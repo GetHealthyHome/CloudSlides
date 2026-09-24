@@ -32,6 +32,12 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
 - **Present.** A full-screen stage that keeps the 11:8.5 shape, with ← / → / Space keys, dots, and Prev/Next buttons.
 - **Export / Print PDF.** Uses `@page { size: letter landscape; margin: 0 }`. Every slide is exactly 11 × 8.5 in on its own page, with no app chrome, exact print colors, and no trailing blank page.
 
+## Where templates are saved
+
+- **Shared library (Supabase).** Click **Library**, sign in with a crew account, then **Save** (or Ctrl/⌘ S). Everyone signed in sees the same decks on any computer and can open, edit, copy or delete them. If two people edit the same deck, the second person to save is asked whether to replace the other version or keep both. Decks are stored in the `slide_decks` table; JPG/PNG images placed in templates are uploaded to the public `template-assets` storage bucket. The schema is in `supabase/migrations/`.
+- **This browser.** Every change is also saved automatically in the browser (IndexedDB), so work survives reloads and opens offline. The **Library** button shows whether the open deck has changes that aren't in the library yet.
+- **Files.** **Export → Template deck (.json)** and **Import** still work for backups or moving a deck by hand.
+
 ## Project data sources
 
 | Source | How |
@@ -64,4 +70,3 @@ js/templates.js     element defaults and the starter deck
 js/app.js           editor: canvas, snap grid, inspector, deck, history, autosave
 ```
 
-Work is saved automatically in the browser (IndexedDB), so it survives reloads and offline use.

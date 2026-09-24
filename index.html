@@ -16,6 +16,9 @@
     <button type="button" id="btnProject" class="btn" title="Choose which project fills the templates">
       <span class="dot" id="projectDot"></span><span id="projectLabel">No project</span>
     </button>
+    <button type="button" id="btnLibrary" class="btn" title="Shared template library (Ctrl/⌘ S saves)">
+      <span class="dot" id="cloudDot"></span><span id="cloudLabel">Library</span>
+    </button>
     <button type="button" id="btnImport" class="btn">Import</button>
     <div class="menu">
       <button type="button" id="btnExport" class="btn" aria-haspopup="true" aria-expanded="false">Export &#9662;</button>
@@ -154,6 +157,36 @@
       <h3>Available fields</h3>
       <p class="muted">Type these into any text box. Click one to copy it.</p>
       <div class="chips" id="fieldChips"></div>
+    </div>
+  </dialog>
+
+  <dialog id="libraryDialog" class="dialog">
+    <form method="dialog" class="dlg-head">
+      <h2>Template library</h2>
+      <button class="btn sm" value="close" aria-label="Close">&#10005;</button>
+    </form>
+    <div class="dlg-body">
+      <p class="muted">Shared by everyone who signs in with a crew account, on any computer. Your work is also kept in this browser, so it still opens offline.</p>
+      <div id="libSignedOut">
+        <form id="libLogin" class="form-row">
+          <input type="email" id="libEmail" placeholder="Email" autocomplete="username" required>
+          <input type="password" id="libPassword" placeholder="Password" autocomplete="current-password" required>
+          <button class="btn primary" type="submit">Sign in</button>
+        </form>
+      </div>
+      <div id="libSignedIn" hidden>
+        <div class="current-project" id="libCurrent"></div>
+        <div class="form-row">
+          <button type="button" class="btn primary" id="libSave">Save</button>
+          <button type="button" class="btn" id="libSaveCopy">Save as new copy</button>
+          <div class="spacer"></div>
+          <button type="button" class="btn" id="libNew">New deck…</button>
+        </div>
+        <h3>All decks <button type="button" class="btn sm" id="libRefresh">Refresh</button></h3>
+        <ul class="lib-list" id="libList"></ul>
+        <div class="form-row"><span class="muted" id="libWho"></span><div class="spacer"></div><button type="button" class="btn sm" id="libSignOut">Sign out</button></div>
+      </div>
+      <p class="error" id="libError" role="alert"></p>
     </div>
   </dialog>
 

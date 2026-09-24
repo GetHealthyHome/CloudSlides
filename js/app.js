@@ -30,7 +30,8 @@
     z: 1,
     dataPreview: true,
     clipboard: null,
-    tool: null // 'line' while drawing a line
+    tool: null, // 'line' while drawing a line
+    cloud: null // { id, name, updatedAt, updatedBy, dirty } when this deck is in the shared library
   };
   var history = { undo: [], redo: [], lastKey: null, lastTime: 0 };
 
@@ -120,6 +121,11 @@
 
   var saveTimer;
   function save() {
+    if (state.cloud && !state.cloud.dirty) {
+      state.cloud.dirty = true;
+      store.set('cloud', state.cloud).catch(function () {});
+      renderCloudStatus();
+    }
     clearTimeout(saveTimer);
     setStatus('Saving…');
     saveTimer = setTimeout(function () {
@@ -1342,6 +1348,211 @@
   $('#projSample').addEventListener('click', function () { setProject(D.sampleProject()); toast('Sample project loaded'); });
   $('#projClear').addEventListener('click', function () { setProject(null); });
 
+  /* ---------- shared template library (Supabase) ---------- */
+
+  var libDialog = $('#libraryDialog');
+
+  function timeAgo(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    var s = (Date.now() - d.getTime()) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function renderCloudStatus() {
+    var c = state.cloud;
+    var dot = $('#cloudDot');
+    dot.classList.toggle('on', !!c && !c.dirty);
+    dot.classList.toggle('warn', !!c && c.dirty);
+    $('#cloudLabel').textContent = !c ? 'Library' : (c.dirty ? 'Library · unsaved' : 'Library · saved');
+  }
+
+  function setCloud(meta) {
+    state.cloud = meta;
+    store.set('cloud', meta).catch(function () {});
+    renderCloudStatus();
+  }
+
+  function libError(msg) { $('#libError').textContent = msg || ''; }
+
+  function renderLibrary() {
+    var s = D.getSession();
+    $('#libSignedOut').hidden = !!s;
+    $('#libSignedIn').hidden = !s;
+    if (!s) return;
+    $('#libWho').textContent = 'Signed in as ' + (s.email || 'crew member');
+    var c = state.cloud;
+    var cur = $('#libCurrent');
+    cur.innerHTML = '';
+    cur.appendChild(h('div', null, h('b', { text: state.doc.name })));
+    cur.appendChild(h('div', { class: 'muted', text: !c
+      ? 'This deck is only in this browser. Click Save to put it in the shared library.'
+      : (c.dirty ? 'Has changes that are not in the library yet.' : 'Up to date in the library.') +
+        (c.updatedAt ? ' Last saved ' + timeAgo(c.updatedAt) + (c.updatedBy ? ' by ' + c.updatedBy : '') + '.' : '') }));
+    $('#libSave').textContent = c ? 'Save changes' : 'Save to library';
+  }
+
+  function refreshLibrary() {
+    libError('');
+    var list = $('#libList');
+    list.innerHTML = '<li class="muted">Loading…</li>';
+    return D.listDecks().then(function (rows) {
+      list.innerHTML = '';
+      if (!rows.length) list.appendChild(h('li', { class: 'muted' }, 'No decks saved yet. Save this one to start the library.'));
+      rows.forEach(function (r) {
+        var isCur = state.cloud && state.cloud.id === r.id;
+        list.appendChild(h('li', { class: isCur ? 'current' : '' },
+          h('div', { class: 'lib-meta' },
+            h('b', { text: r.name + (isCur ? ' (open now)' : '') }),
+            h('small', { text: 'Saved ' + timeAgo(r.updated_at) + (r.updated_by ? ' by ' + r.updated_by : '') })),
+          h('button', { type: 'button', class: 'btn sm', onclick: function () { openFromLibrary(r); } }, 'Open'),
+          h('button', { type: 'button', class: 'btn sm danger', onclick: function () { deleteFromLibrary(r); } }, 'Delete')));
+      });
+    }).catch(function (e) {
+      list.innerHTML = '';
+      libError(e.message);
+      renderLibrary();
+    });
+  }
+
+  function openLibrary() {
+    libError('');
+    renderLibrary();
+    if (!libDialog.open) libDialog.showModal();
+    if (D.getSession()) refreshLibrary();
+  }
+
+  // Uploaded JPG/PNGs live inside the deck as data: URLs; move them to
+  // storage first so the saved deck stays small and exports can load them.
+  function uploadEmbeddedImages() {
+    var els = [];
+    state.doc.templates.forEach(function (t) {
+      t.elements.forEach(function (e) { if (e.type === 'image' && /^data:image\//.test(e.src || '')) els.push(e); });
+    });
+    if (!els.length) return Promise.resolve();
+    var cache = {};
+    return els.reduce(function (p, e) {
+      return p.then(function () {
+        cache[e.src] = cache[e.src] || D.uploadAsset(e.src);
+        return cache[e.src].then(function (url) { e.uploaded = url; });
+      });
+    }, Promise.resolve()).then(function () {
+      change(function () { els.forEach(function (e) { e.src = e.uploaded; delete e.uploaded; }); });
+    });
+  }
+
+  var saving = false;
+  function saveToLibrary(asCopy) {
+    if (!D.getSession()) { openLibrary(); return Promise.resolve(); }
+    if (saving) return Promise.resolve();
+    saving = true;
+    libError('');
+    setStatus('Saving to library…');
+    return uploadEmbeddedImages().then(function () {
+      var c = state.cloud;
+      if (asCopy || !c) {
+        var doc = clone(state.doc);
+        if (asCopy) {
+          var nm = prompt('Name for the new copy', state.doc.name + ' copy');
+          if (nm == null) return null;
+          doc.name = nm.trim() || doc.name;
+        }
+        return D.createDeck(doc).then(function (row) {
+          if (asCopy) state.doc.name = doc.name;
+          return row;
+        });
+      }
+      return D.updateDeck(c.id, clone(state.doc), c.updatedAt).then(function (row) {
+        if (row) return row;
+        // Someone else saved since this deck was opened.
+        if (confirm('Someone else saved "' + c.name + '" in the library since you opened it.\n\nOK = replace their version with yours\nCancel = keep both (save yours as a new copy)')) {
+          return D.updateDeck(c.id, clone(state.doc), null);
+        }
+        var copy = clone(state.doc);
+        copy.name = state.doc.name + ' (my copy)';
+        state.doc.name = copy.name;
+        return D.createDeck(copy);
+      });
+    }).then(function (row) {
+      if (!row) { setStatus('Saved'); return; }
+      setCloud({ id: row.id, name: row.name, updatedAt: row.updated_at, updatedBy: row.updated_by, dirty: false });
+      store.set('doc', state.doc).catch(function () {});
+      renderHeader();
+      setStatus('Saved to library');
+      toast('Saved “' + row.name + '” to the library');
+      if (libDialog.open) { renderLibrary(); refreshLibrary(); }
+    }).catch(function (e) {
+      setStatus('Library save failed');
+      libError(e.message);
+      if (!libDialog.open) toast('Library save failed: ' + e.message);
+    }).then(function () { saving = false; });
+  }
+
+  function confirmLeave(action) {
+    var c = state.cloud;
+    if (c && !c.dirty) return true;
+    return confirm(c ? 'This deck has changes that are not saved to the library. ' + action + ' anyway?'
+      : 'This deck is not saved to the library. ' + action + ' anyway? (It will be replaced in this browser.)');
+  }
+
+  function loadDoc(doc, cloudMeta) {
+    pushHistory();
+    state.doc = normalizeDoc(doc);
+    state.currentId = state.doc.templates[0] ? state.doc.templates[0].id : null;
+    state.selectedId = null;
+    state.deckEntryId = null;
+    setCloud(cloudMeta);
+    store.set('doc', state.doc).catch(function () {});
+    renderAll();
+  }
+
+  function openFromLibrary(r) {
+    if (state.cloud && state.cloud.id === r.id && !state.cloud.dirty) { libDialog.close(); return; }
+    if (!confirmLeave('Open “' + r.name + '”')) return;
+    libError('');
+    D.getDeck(r.id).then(function (row) {
+      loadDoc(row.doc, { id: row.id, name: row.name, updatedAt: row.updated_at, updatedBy: row.updated_by, dirty: false });
+      libDialog.close();
+      toast('Opened “' + row.name + '”');
+    }).catch(function (e) { libError(e.message); });
+  }
+
+  function deleteFromLibrary(r) {
+    if (!confirm('Delete “' + r.name + '” from the shared library for everyone? This cannot be undone.')) return;
+    D.deleteDeck(r.id).then(function () {
+      if (state.cloud && state.cloud.id === r.id) setCloud(null);
+      toast('Deleted “' + r.name + '” from the library');
+      renderLibrary();
+      refreshLibrary();
+    }).catch(function (e) { libError(e.message); });
+  }
+
+  $('#btnLibrary').addEventListener('click', openLibrary);
+  $('#libLogin').addEventListener('submit', function (e) {
+    e.preventDefault();
+    libError('');
+    var btn = this.querySelector('button');
+    btn.disabled = true;
+    D.signIn($('#libEmail').value.trim(), $('#libPassword').value).then(function () {
+      $('#libPassword').value = '';
+      renderLibrary();
+      return refreshLibrary();
+    }).catch(function (err) { libError(err.message); }).then(function () { btn.disabled = false; });
+  });
+  $('#libSignOut').addEventListener('click', function () { D.signOut(); renderLibrary(); });
+  $('#libRefresh').addEventListener('click', refreshLibrary);
+  $('#libSave').addEventListener('click', function () { saveToLibrary(false); });
+  $('#libSaveCopy').addEventListener('click', function () { saveToLibrary(true); });
+  $('#libNew').addEventListener('click', function () {
+    if (!confirmLeave('Start a new deck')) return;
+    loadDoc(T.starterDeck(), null);
+    libDialog.close();
+    toast('New deck started from the starter templates');
+  });
+
   /* ---------- header actions ---------- */
 
   $('#deckName').addEventListener('input', function () {
@@ -1433,6 +1644,7 @@
       change(function () {
         if (replace) {
           state.doc = d;
+          setCloud(null); // an imported file is a new deck, not the library copy
         } else {
           d.templates.forEach(function (t) {
             if (state.doc.templates.some(function (x) { return x.id === t.id; })) {
@@ -1456,10 +1668,11 @@
   /* ---------- keyboard ---------- */
 
   document.addEventListener('keydown', function (e) {
-    if (document.querySelector('.cs-viewer') || dialog.open) return;
+    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open) return;
     var typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]');
     var mod = e.metaKey || e.ctrlKey;
     var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (mod && key === 's') { e.preventDefault(); saveToLibrary(false); return; }
     if (mod && key === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && key === 'y' && !typing) { e.preventDefault(); redo(); return; }
     if (typing) return;
@@ -1496,7 +1709,8 @@
 
   /* ---------- boot ---------- */
 
-  Promise.all([store.get('doc'), store.get('project')]).then(function (res) {
+  Promise.all([store.get('doc'), store.get('project'), store.get('cloud')]).then(function (res) {
+    state.cloud = res[2] || null;
     state.doc = normalizeDoc(res[0] || T.starterDeck());
     // First run: show the sample project so the templates have something to fill.
     state.project = res[1] !== undefined ? res[1] : D.sampleProject();
@@ -1504,6 +1718,7 @@
     state.dataPreview = dp == null ? true : !!dp;
     state.currentId = state.doc.templates[0] ? state.doc.templates[0].id : null;
     renderAll();
+    renderCloudStatus();
     if (!res[0]) save();
   });
 

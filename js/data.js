@@ -82,16 +82,79 @@
       .catch(function () { setSession(null); return null; });
   }
 
-  function rest(path) {
+  // init: optional { method, body, headers } for writes.
+  function rest(path, init) {
     var c = getConfig();
+    init = init || {};
     return validSession().then(function (s) {
       if (!s) throw new Error('Please sign in to Supabase first.');
+      var headers = Object.assign({ apikey: c.key, Authorization: 'Bearer ' + s.access_token, Accept: 'application/json' }, init.headers || {});
+      if (init.body !== undefined) headers['Content-Type'] = 'application/json';
       return netFetch(trimUrl(c.url) + '/rest/v1/' + path, {
-        headers: { apikey: c.key, Authorization: 'Bearer ' + s.access_token, Accept: 'application/json' }
+        method: init.method || 'GET',
+        headers: headers,
+        body: init.body !== undefined ? JSON.stringify(init.body) : undefined
       });
     }).then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw new Error('Supabase ' + r.status + ': ' + t); });
-      return r.json();
+      return r.status === 204 ? [] : r.json();
+    });
+  }
+
+  /* ---------- shared template library (table: slide_decks) ---------- */
+
+  var DECKS = 'slide_decks';
+  var ASSET_BUCKET = 'template-assets';
+
+  function listDecks() {
+    return rest(DECKS + '?select=id,name,updated_at,updated_by&order=updated_at.desc&limit=500');
+  }
+
+  function getDeck(id) {
+    return rest(DECKS + '?select=*&id=eq.' + encodeURIComponent(id)).then(function (rows) {
+      if (!rows[0]) throw new Error('That deck no longer exists in the library.');
+      return rows[0];
+    });
+  }
+
+  function createDeck(doc) {
+    return rest(DECKS + '?select=id,name,updated_at,updated_by', {
+      method: 'POST', body: { name: doc.name || 'Untitled deck', doc: doc }, headers: { Prefer: 'return=representation' }
+    }).then(function (rows) { return rows[0]; });
+  }
+
+  // Only overwrites if nobody else saved since we loaded it (expectedUpdatedAt).
+  // Resolves null on a conflict so the caller can ask what to do.
+  function updateDeck(id, doc, expectedUpdatedAt) {
+    var q = DECKS + '?id=eq.' + encodeURIComponent(id) + (expectedUpdatedAt ? '&updated_at=eq.' + encodeURIComponent(expectedUpdatedAt) : '') + '&select=id,name,updated_at,updated_by';
+    return rest(q, {
+      method: 'PATCH', body: { name: doc.name || 'Untitled deck', doc: doc }, headers: { Prefer: 'return=representation' }
+    }).then(function (rows) { return rows[0] || null; });
+  }
+
+  function deleteDeck(id) {
+    return rest(DECKS + '?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
+  }
+
+  // Upload a data: URL image to the public template-assets bucket; resolves its public URL.
+  function uploadAsset(dataUrl) {
+    var c = getConfig();
+    var m = /^data:(image\/(png|jpeg));base64,/.exec(dataUrl || '');
+    if (!m) return Promise.reject(new Error('Only PNG and JPG images can be saved to the library.'));
+    var bin = atob(dataUrl.slice(m[0].length));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    var name = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2)) + (m[2] === 'png' ? '.png' : '.jpg');
+    return validSession().then(function (s) {
+      if (!s) throw new Error('Please sign in to Supabase first.');
+      return netFetch(trimUrl(c.url) + '/storage/v1/object/' + ASSET_BUCKET + '/' + name, {
+        method: 'POST',
+        headers: { apikey: c.key, Authorization: 'Bearer ' + s.access_token, 'Content-Type': m[1], 'x-upsert': 'false' },
+        body: new Blob([bytes], { type: m[1] })
+      });
+    }).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error('Image upload failed (' + r.status + '): ' + t); });
+      return trimUrl(c.url) + '/storage/v1/object/public/' + ASSET_BUCKET + '/' + name;
     });
   }
 
@@ -237,6 +300,12 @@
     signIn: signIn,
     signOut: signOut,
     listProjects: listProjects,
+    listDecks: listDecks,
+    getDeck: getDeck,
+    createDeck: createDeck,
+    updateDeck: updateDeck,
+    deleteDeck: deleteDeck,
+    uploadAsset: uploadAsset,
     loadProject: loadProject,
     fromJSON: fromJSON,
     sampleProject: sampleProject,
