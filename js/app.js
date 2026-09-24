@@ -18,7 +18,7 @@
 
   R.injectCSS(document);
 
-  var PRESETS = ['#ffffff', '#f5f5f7', '#d1d1d6', '#8e8e93', '#1d1d1f', '#14213d', '#1f2f55', '#0a84ff', '#e8f1ff', '#34c759', '#ff9f0a', '#ff3b30', '#5e5ce6', '#bf5af2'];
+  var PRESETS = T.PALETTE; // [{ name, hex }]
 
   var state = {
     doc: null,
@@ -30,7 +30,8 @@
     z: 1,
     dataPreview: true,
     clipboard: null,
-    tool: null // 'line' while drawing a line
+    tool: null, // 'line' while drawing a line
+    cloud: null // { id, name, updatedAt, updatedBy, dirty } when this deck is in the shared library
   };
   var history = { undo: [], redo: [], lastKey: null, lastTime: 0 };
 
@@ -120,6 +121,11 @@
 
   var saveTimer;
   function save() {
+    if (state.cloud && !state.cloud.dirty) {
+      state.cloud.dirty = true;
+      store.set('cloud', state.cloud).catch(function () {});
+      renderCloudStatus();
+    }
     clearTimeout(saveTimer);
     setStatus('Saving…');
     saveTimer = setTimeout(function () {
@@ -797,8 +803,8 @@
     var swatches = h('div', { class: 'swatches' });
     if (allowNone) swatches.appendChild(h('button', { type: 'button', class: 'sw none', title: 'None (transparent)', 'aria-label': 'No color', onclick: function () { apply('none'); } }));
     PRESETS.forEach(function (c) {
-      var b = h('button', { type: 'button', class: 'sw', title: c, 'aria-label': 'Color ' + c, onclick: function () { apply(c); } });
-      b.style.background = c;
+      var b = h('button', { type: 'button', class: 'sw', title: c.name + ' ' + c.hex, 'aria-label': c.name, onclick: function () { apply(c.hex); } });
+      b.style.background = c.hex;
       swatches.appendChild(b);
     });
     return h('div', { class: 'color-field' },
@@ -871,7 +877,7 @@
     return elementTitle(el);
   }
 
-  var LAYER_ICON = { text: 'T', image: '▣', line: '╱' };
+  var LAYER_ICON = { text: 'T', image: '▣', line: '╱', chart: '▮' };
 
   // Stack of items on this slide, front-most first (like PowerPoint's Selection Pane).
   function renderLayers(wrap, t) {
@@ -945,7 +951,7 @@
     wrap.appendChild(h('h2', { text: 'Page' }));
     wrap.appendChild(h('p', { class: 'note', text: 'US Letter landscape, 11 × 8.5 in. Every slide prints on exactly one page. Items can’t be dragged off the page.' }));
     wrap.appendChild(h('h2', { text: 'Shortcuts' }));
-    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · L line (drag to draw) · I image · Ctrl/⌘ ] / [ bring forward / send backward (Shift = all the way) · Alt/Option-click selects the item underneath · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
+    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · L line (drag to draw) · G bar chart · I image · Ctrl/⌘ ] / [ bring forward / send backward (Shift = all the way) · Alt/Option-click selects the item underneath · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
   }
 
   function projectValues(key) {
@@ -959,6 +965,7 @@
   function elementTitle(el) {
     if (el.type === 'text') return 'Text box';
     if (el.type === 'line') return el.capEnd === 'arrow' || el.capStart === 'arrow' ? 'Arrow' : 'Line';
+    if (el.type === 'chart') return 'Bar chart';
     if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo slot' : 'Image';
     return (Number(el.radius) || 0) > 0 ? 'Rounded box' : 'Square box';
   }
@@ -1013,6 +1020,7 @@
     if (el.type === 'text') textInspector(wrap, el);
     if (el.type === 'image') imageInspector(wrap, el);
     if (isLine(el)) { lineInspector(wrap, el); return; }
+    if (el.type === 'chart') chartInspector(wrap, el);
 
     wrap.appendChild(h('h2', { text: el.type === 'shape' ? 'Box' : 'Box style' }));
     wrap.appendChild(row('Corners', seg([['square', 'Square'], ['round', 'Rounded']], (Number(el.radius) || 0) > 0 ? 'round' : 'square', function (v) {
@@ -1032,6 +1040,49 @@
     var op = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(el.opacity == null ? 1 : el.opacity), 'aria-label': 'Opacity' });
     op.addEventListener('input', function () { setProp(el, 'opacity', parseFloat(op.value)); });
     wrap.appendChild(row('Opacity', op));
+  }
+
+  function chartInspector(wrap, el) {
+    wrap.appendChild(h('h2', { text: 'Bars' }));
+    // Suggest {{field}} tokens in the value boxes so bars can come from project data.
+    var dl = h('datalist', { id: 'cs-field-tokens' });
+    D.fieldPaths(state.project).forEach(function (f) { dl.appendChild(h('option', { value: '{{' + f + '}}' })); });
+    wrap.appendChild(dl);
+    var table = h('div', { class: 'bars' },
+      h('div', { class: 'bars-head' }, h('span', { text: 'Label' }), h('span', { text: 'Value' }), h('span')));
+    el.bars.forEach(function (b, i) {
+      var lab = h('input', { type: 'text', value: b.label, 'aria-label': 'Bar ' + (i + 1) + ' label' });
+      lab.addEventListener('input', function () { change(function () { b.label = lab.value; }, { key: 'bars:' + el.id, inspector: false }); });
+      var val = h('input', { type: 'text', value: String(b.value), list: 'cs-field-tokens', inputmode: 'decimal', placeholder: '0 or {{field}}', 'aria-label': 'Bar ' + (i + 1) + ' value' });
+      val.addEventListener('input', function () { change(function () { b.value = val.value; }, { key: 'bars:' + el.id, inspector: false }); });
+      table.appendChild(h('div', { class: 'bars-row' }, lab, val,
+        h('button', { type: 'button', class: 'icon-btn', title: 'Remove bar', 'aria-label': 'Remove bar ' + (i + 1), disabled: el.bars.length <= 1, onclick: function () {
+          change(function () { el.bars.splice(i, 1); });
+        } }, '✕')));
+    });
+    wrap.appendChild(table);
+    wrap.appendChild(h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn sm', disabled: el.bars.length >= 24, onclick: function () {
+        change(function () { el.bars.push({ label: 'Item ' + String.fromCharCode(65 + el.bars.length % 26), value: '50' }); });
+      } }, '+ Add bar')));
+    wrap.appendChild(h('p', { class: 'note', text: 'Values can be numbers or project fields such as {{payload.blower_door_cfm50}}. Symbols like $ and commas are ignored.' }));
+
+    wrap.appendChild(h('h2', { text: 'Chart style' }));
+    wrap.appendChild(colorField('Bar color', el.barColor || '#2f7d45', false, function (v) { setProp(el, 'barColor', v); }));
+    wrap.appendChild(colorField('Text color', el.color || '#4a4a4a', false, function (v) { setProp(el, 'color', v); }));
+    wrap.appendChild(row('Text pt', numInput(el.fontSize || 10, 1, 6, 36, function (v) { setProp(el, 'fontSize', v); })));
+    var pre = h('input', { type: 'text', value: el.prefix || '', placeholder: 'e.g. $' });
+    pre.addEventListener('input', function () { setProp(el, 'prefix', pre.value); });
+    wrap.appendChild(row('Prefix', pre));
+    var suf = h('input', { type: 'text', value: el.suffix || '', placeholder: 'e.g. % or CFM' });
+    suf.addEventListener('input', function () { setProp(el, 'suffix', suf.value); });
+    wrap.appendChild(row('Suffix', suf));
+    wrap.appendChild(row('Decimals', numInput(el.decimals || 0, 1, 0, 4, function (v) { setProp(el, 'decimals', Math.round(v)); })));
+    [['showValues', 'Values on bars'], ['showGrid', 'Gridlines'], ['showAxis', 'Value axis']].forEach(function (o) {
+      var cb = h('input', { type: 'checkbox', checked: el[o[0]] !== false });
+      cb.addEventListener('change', function () { change(function () { el[o[0]] = cb.checked; }, { inspector: false }); });
+      wrap.appendChild(h('label', { class: 'check-row' }, cb, ' ' + o[1]));
+    });
   }
 
   function lineInspector(wrap, el) {
@@ -1297,6 +1348,211 @@
   $('#projSample').addEventListener('click', function () { setProject(D.sampleProject()); toast('Sample project loaded'); });
   $('#projClear').addEventListener('click', function () { setProject(null); });
 
+  /* ---------- shared template library (Supabase) ---------- */
+
+  var libDialog = $('#libraryDialog');
+
+  function timeAgo(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    var s = (Date.now() - d.getTime()) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function renderCloudStatus() {
+    var c = state.cloud;
+    var dot = $('#cloudDot');
+    dot.classList.toggle('on', !!c && !c.dirty);
+    dot.classList.toggle('warn', !!c && c.dirty);
+    $('#cloudLabel').textContent = !c ? 'Library' : (c.dirty ? 'Library · unsaved' : 'Library · saved');
+  }
+
+  function setCloud(meta) {
+    state.cloud = meta;
+    store.set('cloud', meta).catch(function () {});
+    renderCloudStatus();
+  }
+
+  function libError(msg) { $('#libError').textContent = msg || ''; }
+
+  function renderLibrary() {
+    var s = D.getSession();
+    $('#libSignedOut').hidden = !!s;
+    $('#libSignedIn').hidden = !s;
+    if (!s) return;
+    $('#libWho').textContent = 'Signed in as ' + (s.email || 'crew member');
+    var c = state.cloud;
+    var cur = $('#libCurrent');
+    cur.innerHTML = '';
+    cur.appendChild(h('div', null, h('b', { text: state.doc.name })));
+    cur.appendChild(h('div', { class: 'muted', text: !c
+      ? 'This deck is only in this browser. Click Save to put it in the shared library.'
+      : (c.dirty ? 'Has changes that are not in the library yet.' : 'Up to date in the library.') +
+        (c.updatedAt ? ' Last saved ' + timeAgo(c.updatedAt) + (c.updatedBy ? ' by ' + c.updatedBy : '') + '.' : '') }));
+    $('#libSave').textContent = c ? 'Save changes' : 'Save to library';
+  }
+
+  function refreshLibrary() {
+    libError('');
+    var list = $('#libList');
+    list.innerHTML = '<li class="muted">Loading…</li>';
+    return D.listDecks().then(function (rows) {
+      list.innerHTML = '';
+      if (!rows.length) list.appendChild(h('li', { class: 'muted' }, 'No decks saved yet. Save this one to start the library.'));
+      rows.forEach(function (r) {
+        var isCur = state.cloud && state.cloud.id === r.id;
+        list.appendChild(h('li', { class: isCur ? 'current' : '' },
+          h('div', { class: 'lib-meta' },
+            h('b', { text: r.name + (isCur ? ' (open now)' : '') }),
+            h('small', { text: 'Saved ' + timeAgo(r.updated_at) + (r.updated_by ? ' by ' + r.updated_by : '') })),
+          h('button', { type: 'button', class: 'btn sm', onclick: function () { openFromLibrary(r); } }, 'Open'),
+          h('button', { type: 'button', class: 'btn sm danger', onclick: function () { deleteFromLibrary(r); } }, 'Delete')));
+      });
+    }).catch(function (e) {
+      list.innerHTML = '';
+      libError(e.message);
+      renderLibrary();
+    });
+  }
+
+  function openLibrary() {
+    libError('');
+    renderLibrary();
+    if (!libDialog.open) libDialog.showModal();
+    if (D.getSession()) refreshLibrary();
+  }
+
+  // Uploaded JPG/PNGs live inside the deck as data: URLs; move them to
+  // storage first so the saved deck stays small and exports can load them.
+  function uploadEmbeddedImages() {
+    var els = [];
+    state.doc.templates.forEach(function (t) {
+      t.elements.forEach(function (e) { if (e.type === 'image' && /^data:image\//.test(e.src || '')) els.push(e); });
+    });
+    if (!els.length) return Promise.resolve();
+    var cache = {};
+    return els.reduce(function (p, e) {
+      return p.then(function () {
+        cache[e.src] = cache[e.src] || D.uploadAsset(e.src);
+        return cache[e.src].then(function (url) { e.uploaded = url; });
+      });
+    }, Promise.resolve()).then(function () {
+      change(function () { els.forEach(function (e) { e.src = e.uploaded; delete e.uploaded; }); });
+    });
+  }
+
+  var saving = false;
+  function saveToLibrary(asCopy) {
+    if (!D.getSession()) { openLibrary(); return Promise.resolve(); }
+    if (saving) return Promise.resolve();
+    saving = true;
+    libError('');
+    setStatus('Saving to library…');
+    return uploadEmbeddedImages().then(function () {
+      var c = state.cloud;
+      if (asCopy || !c) {
+        var doc = clone(state.doc);
+        if (asCopy) {
+          var nm = prompt('Name for the new copy', state.doc.name + ' copy');
+          if (nm == null) return null;
+          doc.name = nm.trim() || doc.name;
+        }
+        return D.createDeck(doc).then(function (row) {
+          if (asCopy) state.doc.name = doc.name;
+          return row;
+        });
+      }
+      return D.updateDeck(c.id, clone(state.doc), c.updatedAt).then(function (row) {
+        if (row) return row;
+        // Someone else saved since this deck was opened.
+        if (confirm('Someone else saved "' + c.name + '" in the library since you opened it.\n\nOK = replace their version with yours\nCancel = keep both (save yours as a new copy)')) {
+          return D.updateDeck(c.id, clone(state.doc), null);
+        }
+        var copy = clone(state.doc);
+        copy.name = state.doc.name + ' (my copy)';
+        state.doc.name = copy.name;
+        return D.createDeck(copy);
+      });
+    }).then(function (row) {
+      if (!row) { setStatus('Saved'); return; }
+      setCloud({ id: row.id, name: row.name, updatedAt: row.updated_at, updatedBy: row.updated_by, dirty: false });
+      store.set('doc', state.doc).catch(function () {});
+      renderHeader();
+      setStatus('Saved to library');
+      toast('Saved “' + row.name + '” to the library');
+      if (libDialog.open) { renderLibrary(); refreshLibrary(); }
+    }).catch(function (e) {
+      setStatus('Library save failed');
+      libError(e.message);
+      if (!libDialog.open) toast('Library save failed: ' + e.message);
+    }).then(function () { saving = false; });
+  }
+
+  function confirmLeave(action) {
+    var c = state.cloud;
+    if (c && !c.dirty) return true;
+    return confirm(c ? 'This deck has changes that are not saved to the library. ' + action + ' anyway?'
+      : 'This deck is not saved to the library. ' + action + ' anyway? (It will be replaced in this browser.)');
+  }
+
+  function loadDoc(doc, cloudMeta) {
+    pushHistory();
+    state.doc = normalizeDoc(doc);
+    state.currentId = state.doc.templates[0] ? state.doc.templates[0].id : null;
+    state.selectedId = null;
+    state.deckEntryId = null;
+    setCloud(cloudMeta);
+    store.set('doc', state.doc).catch(function () {});
+    renderAll();
+  }
+
+  function openFromLibrary(r) {
+    if (state.cloud && state.cloud.id === r.id && !state.cloud.dirty) { libDialog.close(); return; }
+    if (!confirmLeave('Open “' + r.name + '”')) return;
+    libError('');
+    D.getDeck(r.id).then(function (row) {
+      loadDoc(row.doc, { id: row.id, name: row.name, updatedAt: row.updated_at, updatedBy: row.updated_by, dirty: false });
+      libDialog.close();
+      toast('Opened “' + row.name + '”');
+    }).catch(function (e) { libError(e.message); });
+  }
+
+  function deleteFromLibrary(r) {
+    if (!confirm('Delete “' + r.name + '” from the shared library for everyone? This cannot be undone.')) return;
+    D.deleteDeck(r.id).then(function () {
+      if (state.cloud && state.cloud.id === r.id) setCloud(null);
+      toast('Deleted “' + r.name + '” from the library');
+      renderLibrary();
+      refreshLibrary();
+    }).catch(function (e) { libError(e.message); });
+  }
+
+  $('#btnLibrary').addEventListener('click', openLibrary);
+  $('#libLogin').addEventListener('submit', function (e) {
+    e.preventDefault();
+    libError('');
+    var btn = this.querySelector('button');
+    btn.disabled = true;
+    D.signIn($('#libEmail').value.trim(), $('#libPassword').value).then(function () {
+      $('#libPassword').value = '';
+      renderLibrary();
+      return refreshLibrary();
+    }).catch(function (err) { libError(err.message); }).then(function () { btn.disabled = false; });
+  });
+  $('#libSignOut').addEventListener('click', function () { D.signOut(); renderLibrary(); });
+  $('#libRefresh').addEventListener('click', refreshLibrary);
+  $('#libSave').addEventListener('click', function () { saveToLibrary(false); });
+  $('#libSaveCopy').addEventListener('click', function () { saveToLibrary(true); });
+  $('#libNew').addEventListener('click', function () {
+    if (!confirmLeave('Start a new deck')) return;
+    loadDoc(T.starterDeck(), null);
+    libDialog.close();
+    toast('New deck started from the starter templates');
+  });
+
   /* ---------- header actions ---------- */
 
   $('#deckName').addEventListener('input', function () {
@@ -1388,6 +1644,7 @@
       change(function () {
         if (replace) {
           state.doc = d;
+          setCloud(null); // an imported file is a new deck, not the library copy
         } else {
           d.templates.forEach(function (t) {
             if (state.doc.templates.some(function (x) { return x.id === t.id; })) {
@@ -1411,10 +1668,11 @@
   /* ---------- keyboard ---------- */
 
   document.addEventListener('keydown', function (e) {
-    if (document.querySelector('.cs-viewer') || dialog.open) return;
+    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open) return;
     var typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]');
     var mod = e.metaKey || e.ctrlKey;
     var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (mod && key === 's') { e.preventDefault(); saveToLibrary(false); return; }
     if (mod && key === 'z' && !typing) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && key === 'y' && !typing) { e.preventDefault(); redo(); return; }
     if (typing) return;
@@ -1439,7 +1697,7 @@
       change(function () { moveBy(el, arrows[key][0] * step, arrows[key][1] * step); }, { key: 'nudge:' + el.id });
       return;
     }
-    var adds = { t: 'text', b: 'box', r: 'round', i: 'image', l: 'line' };
+    var adds = { t: 'text', b: 'box', r: 'round', i: 'image', l: 'line', g: 'chart' };
     if (adds[key]) { e.preventDefault(); addElement(adds[key]); }
   });
 
@@ -1451,7 +1709,8 @@
 
   /* ---------- boot ---------- */
 
-  Promise.all([store.get('doc'), store.get('project')]).then(function (res) {
+  Promise.all([store.get('doc'), store.get('project'), store.get('cloud')]).then(function (res) {
+    state.cloud = res[2] || null;
     state.doc = normalizeDoc(res[0] || T.starterDeck());
     // First run: show the sample project so the templates have something to fill.
     state.project = res[1] !== undefined ? res[1] : D.sampleProject();
@@ -1459,6 +1718,7 @@
     state.dataPreview = dp == null ? true : !!dp;
     state.currentId = state.doc.templates[0] ? state.doc.templates[0].id : null;
     renderAll();
+    renderCloudStatus();
     if (!res[0]) save();
   });
 

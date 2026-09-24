@@ -22,13 +22,21 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
   - rounded boxes (25 px default radius, adjustable)
   - image / photo slots (JPG or PNG upload, a project photo, or an image URL field)
   - lines and arrows: press **L** or click **Line**, then drag on the slide. Hold Shift for straight or 45° lines. Choose solid, dashed or dotted, and add an arrow at one end or both.
+  - simple vertical bar charts: press **G** or click **Chart**. Type a label and value for each bar; a value can be a number or a project field like `{{payload.blower_door_cfm50}}`. You can add a prefix/suffix (`$`, `%`, `CFM`), and turn value labels, gridlines and the value axis on or off.
+- **Brand palette.** The color pickers offer white, black, dark gray (`#4a4a4a`), light gray (`#d9d9d9`) and four greens (`#1b4d2b`, `#2f7d45`, `#5fae6e`, `#cfe8d4`), plus any custom hex. The swatch list lives in `PALETTE` in `js/templates.js`.
 - **Layers.** Items stack front-to-back, so text can sit on top of a box or a photo. Use the **Layers** list in the right panel, the Bring forward / Send backward buttons, or Ctrl/⌘ `]` and `[` (add Shift to go all the way to the front or back). Alt/Option-click selects the item underneath.
-- **A color picker on every item** for fill, border, text color and slide background: a native color wheel, a hex field, preset swatches, and "none".
+- **A color picker on every item** for fill, border, text color and slide background: a native color wheel, a hex field, the brand swatches, and "none".
 - **Resolution-independent.** Positions are stored in inches and images at their original resolution. Slides are drawn at physical size and only scaled on screen, so resizing never blurs anything.
 - **Master deck.** Put templates in any order, and use the same template as many times as you like. A template can **repeat** to make one slide per photo zone or per group of N photos.
 - **Project data.** Text can hold placeholders like `{{customer_name}}`, `{{address}}`, `{{appointment_date_long}}`, `{{payload.summary}}`, `{{zone}}`, `{{page}}` / `{{pages}}` and `{{today}}`. Photo slots take the project's photos in order, optionally filtered by zone or tag.
 - **Present.** A full-screen stage that keeps the 11:8.5 shape, with ← / → / Space keys, dots, and Prev/Next buttons.
 - **Export / Print PDF.** Uses `@page { size: letter landscape; margin: 0 }`. Every slide is exactly 11 × 8.5 in on its own page, with no app chrome, exact print colors, and no trailing blank page.
+
+## Where templates are saved
+
+- **Shared library (Supabase).** Click **Library**, sign in with a crew account, then **Save** (or Ctrl/⌘ S). Everyone signed in sees the same decks on any computer and can open, edit, copy or delete them. If two people edit the same deck, the second person to save is asked whether to replace the other version or keep both. Decks are stored in the `slide_decks` table; JPG/PNG images placed in templates are uploaded to the public `template-assets` storage bucket. The schema is in `supabase/migrations/`.
+- **This browser.** Every change is also saved automatically in the browser (IndexedDB), so work survives reloads and opens offline. The **Library** button shows whether the open deck has changes that aren't in the library yet.
+- **Files.** **Export → Template deck (.json)** and **Import** still work for backups or moving a deck by hand.
 
 ## Project data sources
 
@@ -62,4 +70,3 @@ js/templates.js     element defaults and the starter deck
 js/app.js           editor: canvas, snap grid, inspector, deck, history, autosave
 ```
 
-Work is saved automatically in the browser (IndexedDB), so it survives reloads and offline use.

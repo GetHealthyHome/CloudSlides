@@ -52,6 +52,7 @@
         elements: s.template.elements.map(function (el) {
           var e = JSON.parse(JSON.stringify(el));
           if (el.type === 'text') e.text = R.fillText(el.text, s.ctx, false);
+          if (el.type === 'chart') e.bars = R.chartBars(el, s.ctx, true);
           if (el.type === 'image') {
             var node = R.renderElement(el, s.ctx, { mode: 'final' });
             var img = node.querySelector('img');

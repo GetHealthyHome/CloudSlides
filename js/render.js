@@ -281,10 +281,107 @@
       return node;
     }
 
+    // Bar values may be numbers or placeholders like {{payload.cfm50}}; "$8,450" -> 8450.
+    function toNumber(v) {
+      var n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
+      return isFinite(n) ? n : 0;
+    }
+
+    function chartBars(el, ctx, useData) {
+      return (el.bars || []).map(function (b) {
+        var label = useData ? fillText(b.label, ctx, false) : String(b.label || '');
+        var raw = useData ? fillText(b.value, ctx, false) : b.value;
+        return { label: label, value: Math.max(0, toNumber(raw)) };
+      });
+    }
+
+    // Round the axis top up to 1, 2, 2.5 or 5 x 10^n so tick labels stay tidy.
+    function niceStep(v) {
+      if (!(v > 0)) return 1;
+      var e = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+      var f = v / e;
+      return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
+    }
+
+    function fmtNum(n, el) {
+      var dec = Math.max(0, Math.min(4, Number(el.decimals) || 0));
+      return (el.prefix || '') + n.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec }) + (el.suffix || '');
+    }
+
+    function fitLabel(s, maxW, fs) {
+      var maxChars = Math.max(1, Math.floor(maxW / (fs * 0.55)));
+      return s.length > maxChars ? s.slice(0, Math.max(1, maxChars - 1)) + '\u2026' : s;
+    }
+
+    /*
+     * Simple vertical bar chart, drawn as SVG in point units (viewBox = box
+     * size in pt) so font sizes match text boxes and it prints crisply.
+     * One series, one color; values are labelled in text ink above each bar.
+     */
+    function renderChart(el, ctx, opts, doc) {
+      var node = doc.createElement('div');
+      node.className = 'cs-el cs-chart';
+      node.setAttribute('data-id', el.id);
+      applyBoxStyle(node, el);
+      var useData = opts.mode !== 'edit' || opts.data;
+      var bars = chartBars(el, ctx, useData);
+      var W = el.w * 72, H = el.h * 72;
+      var fs = Number(el.fontSize) || 10;
+      var ink = el.color || '#4a4a4a';
+      var barColor = el.barColor || '#2f7d45';
+      var maxV = 0;
+      bars.forEach(function (b) { if (b.value > maxV) maxV = b.value; });
+      var step = niceStep((maxV || 1) / 4);
+      var top = Math.max(step, Math.ceil(maxV / step) * step);
+      var ticks = [];
+      for (var t = 0; t <= top + step / 2; t += step) ticks.push(t);
+      var axisW = el.showAxis === false ? 0 : Math.max.apply(null, ticks.map(function (v) { return fmtNum(v, el).length; })) * fs * 0.58 + 6;
+      var pad = 4;
+      var left = pad + axisW, right = W - pad;
+      var plotTop = pad + (el.showValues === false ? fs * 0.6 : fs * 1.7);
+      var base = H - pad - fs * 1.9;
+      var ph = Math.max(1, base - plotTop), pw = Math.max(1, right - left);
+
+      var svg = svgEl(doc, 'svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', role: 'img',
+        'aria-label': 'Bar chart: ' + bars.map(function (b) { return b.label + ' ' + fmtNum(b.value, el); }).join(', ') });
+      svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;font-family:' + FONT_STACK + ';';
+      function txt(x, y, s, anchor, size, weight) {
+        var n = svgEl(doc, 'text', { x: x, y: y, 'text-anchor': anchor, fill: ink, 'font-size': size || fs, 'font-weight': weight || 400 });
+        n.textContent = s;
+        svg.appendChild(n);
+      }
+      ticks.forEach(function (v) {
+        var y = base - (v / top) * ph;
+        if (el.showGrid !== false && v > 0) svg.appendChild(svgEl(doc, 'line', { x1: left, x2: right, y1: y, y2: y, stroke: el.gridColor || '#d9d9d9', 'stroke-width': 0.5 }));
+        if (el.showAxis !== false) txt(left - 5, y + fs * 0.35, fmtNum(v, el), 'end', fs * 0.9);
+      });
+      var n = Math.max(1, bars.length);
+      var band = pw / n;
+      var bw = Math.max(1, Math.min(band * 0.64, band - 1.5)); // at least a 1.5pt gap between bars
+      bars.forEach(function (b, i) {
+        var bh = (b.value / top) * ph;
+        var x = left + i * band + (band - bw) / 2;
+        var y = base - bh;
+        if (bh > 0) {
+          var r = Math.min(3, bw / 2, bh); // rounded data end, square at the baseline
+          svg.appendChild(svgEl(doc, 'path', {
+            d: 'M' + x + ',' + base + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y + 'H' + (x + bw - r) + 'Q' + (x + bw) + ',' + y + ' ' + (x + bw) + ',' + (y + r) + 'V' + base + 'Z',
+            fill: barColor
+          }));
+        }
+        if (el.showValues !== false) txt(x + bw / 2, y - fs * 0.45, fmtNum(b.value, el), 'middle', fs, 600);
+        txt(left + i * band + band / 2, base + fs * 1.35, fitLabel(b.label, band - 2, fs), 'middle', fs);
+      });
+      svg.appendChild(svgEl(doc, 'line', { x1: left, x2: right, y1: base, y2: base, stroke: ink, 'stroke-width': 0.75 }));
+      node.appendChild(svg);
+      return node;
+    }
+
     // opts: { mode: 'edit'|'preview'|'final', data: bool }
     function renderElement(el, ctx, opts, doc) {
       doc = doc || document;
       if (el.type === 'line') return renderLine(el, doc);
+      if (el.type === 'chart') return renderChart(el, ctx || {}, opts || { mode: 'final' }, doc);
       var node = doc.createElement('div');
       node.className = 'cs-el cs-' + el.type;
       node.setAttribute('data-id', el.id);
@@ -486,6 +583,7 @@
       expandDeck: expandDeck,
       renderElement: renderElement,
       lineBox: lineBox,
+      chartBars: chartBars,
       renderSlide: renderSlide,
       renderDeck: renderDeck,
       buildPrintRoot: buildPrintRoot,
