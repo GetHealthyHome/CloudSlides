@@ -187,6 +187,9 @@
       });
       return t;
     });
+    d.fields = (Array.isArray(d.fields) ? d.fields : []).filter(function (f) { return f && f.key; }).map(function (f) {
+      return { key: String(f.key), label: String(f.label || f.key) };
+    });
     var ids = d.templates.map(function (t) { return t.id; });
     d.deck = (d.deck || []).filter(function (e) { return ids.indexOf(e.templateId) >= 0; }).map(function (e) {
       return { id: e.id || T.uid('d'), templateId: e.templateId };
@@ -495,8 +498,26 @@
     startDrag(e, 'resize', 'p2', { created: true });
   }
 
+  // The stage captures the pointer while dragging, so click events report the
+  // stage itself as their target; look up what is actually under the pointer.
+  function nodeAt(e, selector) {
+    var hits = document.elementsFromPoint(e.clientX, e.clientY);
+    for (var i = 0; i < hits.length; i++) {
+      var n = hits[i].closest && hits[i].closest('#slideHost .cs-el');
+      if (n) return n.matches(selector) ? n : null; // topmost item only
+    }
+    return null;
+  }
+
   stage.addEventListener('dblclick', function (e) {
-    var node = e.target.closest('#slideHost .cs-text');
+    var imgNode = nodeAt(e, '.cs-image');
+    if (imgNode) {
+      var imgEl = tpl().elements.filter(function (x) { return x.id === imgNode.getAttribute('data-id'); })[0];
+      // Uploaded-file boxes open the picker; photo/field slots fill from project data instead.
+      if (imgEl && (!imgEl.bind || imgEl.bind.kind === 'none')) pickImageFor(imgEl);
+      return;
+    }
+    var node = nodeAt(e, '.cs-text');
     if (!node) return;
     var t = tpl();
     var el = t.elements.filter(function (x) { return x.id === node.getAttribute('data-id'); })[0];
@@ -539,6 +560,12 @@
     var files = Array.prototype.filter.call(e.dataTransfer.files || [], isImageFile);
     if (!files.length) return;
     e.preventDefault();
+    var onto = document.elementFromPoint(e.clientX, e.clientY);
+    onto = onto && onto.closest('#slideHost .cs-image');
+    if (onto && files.length === 1) {
+      var target = tpl().elements.filter(function (x) { return x.id === onto.getAttribute('data-id'); })[0];
+      if (target) { state.selectedId = target.id; setImageFile(target, files[0]); return; }
+    }
     var rect = stage.getBoundingClientRect();
     var at = { x: (e.clientX - rect.left) / (DPI * state.z), y: (e.clientY - rect.top) / (DPI * state.z) };
     files.forEach(function (f, i) { addImageFromFile(f, { x: at.x + i * 0.25, y: at.y + i * 0.25 }); });
@@ -609,6 +636,7 @@
     if (!t || !src) return;
     var el = clone(src);
     el.id = T.uid('e');
+    if (el.type === 'image' && el.bind && el.bind.kind === 'field') { el.bind.field = ''; el.bind.label = ''; } // each field is used once
     var g = grid().snap ? grid().size : 0.25;
     moveBy(el, g, g);
     change(function () { t.elements.push(el); state.selectedId = el.id; });
@@ -649,7 +677,10 @@
     var c = clone(t);
     c.id = T.uid('t');
     c.name = t.name + ' copy';
-    c.elements.forEach(function (e) { e.id = T.uid('e'); });
+    c.elements.forEach(function (e) {
+      e.id = T.uid('e');
+      if (e.type === 'image' && e.bind && e.bind.kind === 'field') { e.bind.field = ''; e.bind.label = ''; } // each field is used once
+    });
     change(function () {
       var i = state.doc.templates.indexOf(t);
       state.doc.templates.splice(i + 1, 0, c);
@@ -873,6 +904,7 @@
       var txt = String(el.text || '').replace(/\s+/g, ' ').trim();
       return txt ? (txt.length > 26 ? txt.slice(0, 25) + '…' : txt) : 'Empty text';
     }
+    if (el.type === 'image' && el.bind && el.bind.kind === 'field') return 'Field: ' + (el.bind.label || el.bind.field || 'not set');
     if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo #' + ((Number(el.bind.index) || 0) + 1) + (el.bind.zone ? ' · ' + el.bind.zone : '') : (el.alt || 'Image');
     return elementTitle(el);
   }
@@ -966,7 +998,7 @@
     if (el.type === 'text') return 'Text box';
     if (el.type === 'line') return el.capEnd === 'arrow' || el.capStart === 'arrow' ? 'Arrow' : 'Line';
     if (el.type === 'chart') return 'Bar chart';
-    if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo slot' : 'Image';
+    if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo slot' : (el.bind && el.bind.kind === 'field' ? 'Photo field' : 'Image');
     return (Number(el.radius) || 0) > 0 ? 'Rounded box' : 'Square box';
   }
 
@@ -1131,11 +1163,155 @@
     wrap.appendChild(colorField('Text color', el.color || '#1d1d1f', false, function (v) { setProp(el, 'color', v); }));
   }
 
+  /* ---------- photo fields (imported list, each used once) ---------- */
+
+  function humanize(key) {
+    var s = String(key).replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  // Which image slot (if any) already uses each field, across the whole deck.
+  function fieldUsage() {
+    var used = {};
+    state.doc.templates.forEach(function (t) {
+      t.elements.forEach(function (e) {
+        if (e.type === 'image' && e.bind && e.bind.kind === 'field' && e.bind.field) {
+          used[R.fieldKey(e.bind.field)] = { el: e, template: t };
+        }
+      });
+    });
+    return used;
+  }
+
+  function fieldPicker(wrap, el) {
+    var b = el.bind;
+    var fields = state.doc.fields;
+    var used = fieldUsage();
+    var s = h('select', { 'aria-label': 'Photo field' });
+    s.appendChild(h('option', { value: '' }, fields.length ? 'Choose a photo field…' : 'No fields yet — import a list'));
+    var free = 0;
+    fields.forEach(function (f) {
+      var u = used[R.fieldKey(f.key)];
+      var mine = u && u.el === el;
+      var taken = u && !mine;
+      if (!taken) free++;
+      s.appendChild(h('option', { value: f.key, disabled: taken, selected: mine },
+        f.label + (taken ? ' — used on ' + u.template.name : '')));
+    });
+    // A field that was bound before the list changed stays visible.
+    if (b.field && !fields.some(function (f) { return R.fieldKey(f.key) === R.fieldKey(b.field); })) {
+      s.appendChild(h('option', { value: b.field, selected: true }, (b.label || b.field) + ' (not in list)'));
+    }
+    s.addEventListener('change', function () {
+      var f = fields.filter(function (x) { return x.key === s.value; })[0];
+      change(function () { b.field = s.value; b.label = f ? f.label : ''; });
+    });
+    wrap.appendChild(row('Field', s));
+    wrap.appendChild(h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn sm', onclick: openFields }, fields.length ? 'Manage fields…' : 'Import field list…')));
+    wrap.appendChild(h('p', { class: 'note', text: fields.length
+      ? free + ' of ' + fields.length + ' fields still available. A field used on another slot is greyed out. It fills from a URL in the project data with that name, or the project photo whose label, tag or zone matches it.'
+      : 'Import the list of photo fields your field app fills in. Each field can be used once in the deck.' }));
+  }
+
+  function parseFieldList(text, filename) {
+    var t = String(text || '').replace(/^\uFEFF/, '').trim();
+    var items = [];
+    if (!t) return items;
+    if (/\.json$/i.test(filename || '') || /^[\[{]/.test(t)) {
+      var j = JSON.parse(t);
+      if (!Array.isArray(j)) j = j.fields || j.photoFields || j.photo_fields || Object.keys(j);
+      items = j.map(function (x) {
+        return typeof x === 'string' ? { key: x } : { key: x.key || x.field || x.name || x.id, label: x.label || x.title || x.name };
+      });
+    } else {
+      t.split(/\r?\n/).forEach(function (line) {
+        if (!line.trim()) return;
+        var cols = line.split(line.indexOf('\t') >= 0 ? '\t' : ',').map(function (c) { return c.trim().replace(/^"(.*)"$/, '$1').trim(); });
+        items.push({ key: cols[0], label: cols[1] });
+      });
+      if (items.length && /^(key|field|fields|name|field ?name|field_name)$/i.test(items[0].key)) items.shift();
+    }
+    var seen = {};
+    return items.filter(function (x) {
+      x.key = String(x.key == null ? '' : x.key).trim();
+      if (!x.key || seen[R.fieldKey(x.key)] || !R.fieldKey(x.key)) return false;
+      seen[R.fieldKey(x.key)] = true;
+      x.label = String(x.label || '').trim() || humanize(x.key);
+      return true;
+    }).map(function (x) { return { key: x.key, label: x.label }; });
+  }
+
+  var fieldsDialog = $('#fieldsDialog');
+
+  function fieldsError(m) { $('#fieldsError').textContent = m || ''; }
+
+  function renderFields() {
+    var list = $('#fieldsList');
+    var used = fieldUsage();
+    list.innerHTML = '';
+    var fields = state.doc.fields;
+    $('#fieldsCount').textContent = fields.length + ' field' + (fields.length === 1 ? '' : 's') + ' · ' +
+      fields.filter(function (f) { return !used[R.fieldKey(f.key)]; }).length + ' available';
+    if (!fields.length) list.appendChild(h('li', { class: 'muted' }, 'No fields yet. Paste a list above or upload a file.'));
+    fields.forEach(function (f, i) {
+      var u = used[R.fieldKey(f.key)];
+      list.appendChild(h('li', null,
+        h('div', { class: 'lib-meta' }, h('b', { text: f.label }), h('small', { text: f.key })),
+        h('span', { class: 'field-used' + (u ? '' : ' free'), text: u ? 'Used on ' + u.template.name : 'Available' }),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Remove from list', 'aria-label': 'Remove ' + f.label, onclick: function () {
+          change(function () { state.doc.fields.splice(i, 1); });
+          renderFields();
+        } }, '✕')));
+    });
+  }
+
+  function openFields() {
+    fieldsError('');
+    renderFields();
+    fieldsDialog.showModal();
+  }
+
+  function importFields(text, filename, replace) {
+    fieldsError('');
+    var items;
+    try { items = parseFieldList(text, filename); } catch (e) { fieldsError('Could not read that list: ' + e.message); return; }
+    if (!items.length) { fieldsError('No field names found.'); return; }
+    var added = 0;
+    change(function () {
+      if (replace) state.doc.fields = [];
+      items.forEach(function (it) {
+        if (!state.doc.fields.some(function (f) { return R.fieldKey(f.key) === R.fieldKey(it.key); })) {
+          state.doc.fields.push(it);
+          added++;
+        }
+      });
+    });
+    $('#fieldsPaste').value = '';
+    renderFields();
+    toast((replace ? 'List replaced: ' : 'Added ') + added + ' field' + (added === 1 ? '' : 's'));
+  }
+
+  $('#fieldsAdd').addEventListener('click', function () { importFields($('#fieldsPaste').value, '', false); });
+  $('#fieldsReplace').addEventListener('click', function () {
+    if (state.doc.fields.length && !confirm('Replace all ' + state.doc.fields.length + ' fields with the pasted list?')) return;
+    importFields($('#fieldsPaste').value, '', true);
+  });
+  $('#fieldsUpload').addEventListener('click', function () { $('#fileFields').value = ''; $('#fileFields').click(); });
+  $('#fileFields').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    X.readFile(f).then(function (txt) { importFields(txt, f.name, false); });
+  });
+  fieldsDialog.addEventListener('close', function () { renderInspector(); });
+
   function imageInspector(wrap, el) {
     wrap.appendChild(h('h2', { text: 'Image source' }));
     var b = el.bind;
     wrap.appendChild(row('Source', seg([['photo', 'Project photo'], ['none', 'File'], ['field', 'Field']], b.kind === 'none' ? 'none' : b.kind, function (v) {
       change(function () { b.kind = v; });
+      // Choosing "File" on an empty box goes straight to the file picker.
+      if (v === 'none' && !el.src) pickImageFor(el);
     })));
     if (b.kind === 'photo') {
       wrap.appendChild(row('Photo #', numInput((Number(b.index) || 0) + 1, 1, 1, 999, function (v) { change(function () { b.index = Math.round(v) - 1; }); })));
@@ -1150,15 +1326,26 @@
         ? 'This slide repeats, so photo # counts within each repeated page.'
         : 'Photo # picks the Nth project photo (after the zone/tag filter).' }));
     } else if (b.kind === 'field') {
-      wrap.appendChild(row('Field', selectInput([['', 'Choose a field with an image URL…']].concat(fieldOptions()), b.field || '', function (v) {
-        change(function () { b.field = v; });
-      })));
+      fieldPicker(wrap, el);
     } else {
-      wrap.appendChild(h('div', { class: 'btn-row' },
-        h('button', { type: 'button', class: 'btn sm', onclick: function () { pickImageFor(el); } }, el.src ? 'Replace JPG/PNG…' : 'Upload JPG/PNG…'),
-        el.src ? h('button', { type: 'button', class: 'btn sm', title: 'Resize the box to the image’s own proportions', onclick: function () { matchRatio(el); } }, 'Match image ratio') : null
-      ));
-      if (el.src) wrap.appendChild(h('p', { class: 'note', text: 'Stored at full resolution' + (el.alt ? ' (' + el.alt + ')' : '') + ', so it stays sharp at any size.' }));
+      var pick = h('button', { type: 'button', class: 'drop-pick', onclick: function () { pickImageFor(el); } },
+        el.src ? h('img', { src: el.src, alt: '' }) : null,
+        h('b', { text: el.src ? 'Replace image…' : 'Choose a JPG or PNG…' }),
+        h('small', { text: 'or drop a file here or onto the box on the slide' }));
+      pick.addEventListener('dragover', function (e) { e.preventDefault(); pick.classList.add('over'); });
+      pick.addEventListener('dragleave', function () { pick.classList.remove('over'); });
+      pick.addEventListener('drop', function (e) {
+        e.preventDefault();
+        pick.classList.remove('over');
+        var f = Array.prototype.filter.call(e.dataTransfer.files || [], isImageFile)[0];
+        if (f) setImageFile(el, f); else toast('Please drop a JPG or PNG file');
+      });
+      wrap.appendChild(pick);
+      if (el.src) {
+        wrap.appendChild(h('div', { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn sm', title: 'Resize the box to the image’s own proportions', onclick: function () { matchRatio(el); } }, 'Match image ratio')));
+        wrap.appendChild(h('p', { class: 'note', text: 'Kept at full resolution' + (el.alt ? ' (' + el.alt + ')' : '') + ', so it stays sharp at any size.' }));
+      }
     }
     wrap.appendChild(row('Fit', selectInput([['cover', 'Fill box (crop)'], ['contain', 'Fit inside'], ['fill', 'Stretch']], el.fit || 'cover', function (v) { change(function () { el.fit = v; }); })));
     wrap.appendChild(row('Focus', selectInput([['center', 'Center'], ['top', 'Top'], ['bottom', 'Bottom'], ['left', 'Left'], ['right', 'Right']], el.position || 'center', function (v) { change(function () { el.position = v; }); })));
@@ -1170,15 +1357,18 @@
     $('#fileImage').value = '';
     $('#fileImage').click();
   }
+  function setImageFile(el, f) {
+    if (!isImageFile(f)) return toast('Please choose a JPG or PNG file');
+    X.readFile(f, true).then(function (src) {
+      change(function () { el.src = src; el.alt = f.name; el.bind.kind = 'none'; });
+      toast('Added ' + f.name);
+    }).catch(function (e) { toast('Could not read image: ' + e.message); });
+  }
   $('#fileImage').addEventListener('change', function () {
     var f = this.files && this.files[0];
     var el = imageTarget;
     imageTarget = null;
-    if (!f || !el) return;
-    if (!isImageFile(f)) return toast('Please choose a JPG or PNG file');
-    X.readFile(f, true).then(function (src) {
-      change(function () { el.src = src; el.alt = f.name; el.bind.kind = 'none'; });
-    });
+    if (f && el) setImageFile(el, f);
   });
 
   function matchRatio(el) {
@@ -1668,7 +1858,7 @@
   /* ---------- keyboard ---------- */
 
   document.addEventListener('keydown', function (e) {
-    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open) return;
+    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open || fieldsDialog.open) return;
     var typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]');
     var mod = e.metaKey || e.ctrlKey;
     var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;

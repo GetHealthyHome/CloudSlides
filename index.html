@@ -190,6 +190,27 @@
     </div>
   </dialog>
 
+  <dialog id="fieldsDialog" class="dialog">
+    <form method="dialog" class="dlg-head">
+      <h2>Photo fields</h2>
+      <button class="btn sm" value="close" aria-label="Close">&#10005;</button>
+    </form>
+    <div class="dlg-body">
+      <p class="muted">The photo fields your field app fills in. Each one can be placed on one image slot in this deck. The list is saved with the deck (and in the shared library).</p>
+      <label class="stack-label" for="fieldsPaste">Paste field names, one per line. Add a label after a comma if you like: <code>front_elevation, Front elevation</code></label>
+      <textarea id="fieldsPaste" rows="5" spellcheck="false" placeholder="front_elevation, Front elevation&#10;attic_hatch, Attic hatch&#10;furnace_label"></textarea>
+      <div class="form-row">
+        <button type="button" class="btn primary" id="fieldsAdd">Add to list</button>
+        <button type="button" class="btn" id="fieldsReplace">Replace list</button>
+        <button type="button" class="btn" id="fieldsUpload">Upload .csv / .txt / .json…</button>
+      </div>
+      <h3 id="fieldsCount">Fields</h3>
+      <ul class="lib-list" id="fieldsList"></ul>
+      <p class="error" id="fieldsError" role="alert"></p>
+    </div>
+  </dialog>
+  <input type="file" id="fileFields" accept=".csv,.txt,.json,text/csv,text/plain,application/json" hidden>
+
   <input type="file" id="fileImport" accept=".json,.html,application/json,text/html" hidden>
   <input type="file" id="fileImage" accept="image/png,image/jpeg" hidden>
   <input type="file" id="fileProjectJSON" accept=".json,application/json" hidden>

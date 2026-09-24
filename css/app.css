@@ -197,6 +197,22 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .lib-meta small { color: var(--muted); }
 .dot.warn { background: #ff9f0a; }
 
+/* Photo fields */
+.stack-label { display: block; color: var(--muted); margin: 10px 0 6px; line-height: 1.4; }
+.stack-label code, .note code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+#fieldsPaste { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; resize: vertical; margin-bottom: 8px; }
+#fieldsPaste:focus { outline: none; border-color: var(--accent); }
+.field-used { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.field-used.free { color: #2f7d45; }
+.drop-pick {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 16px 10px; margin-bottom: 8px;
+  border: 2px dashed #b9c9bd; border-radius: 10px; background: #f6faf7; color: var(--text); cursor: pointer; text-align: center;
+}
+.drop-pick:hover, .drop-pick.over { border-color: #2f7d45; background: #eaf5ec; }
+.drop-pick b { font-size: 13px; }
+.drop-pick small { color: var(--muted); }
+.drop-pick img { max-width: 100%; max-height: 90px; border-radius: 6px; object-fit: contain; }
+
 /* Bar chart data */
 .bars { border: 1px solid var(--line); border-radius: 8px; padding: 6px; margin-bottom: 8px; }
 .bars-head, .bars-row { display: grid; grid-template-columns: 1fr 1fr 24px; gap: 6px; align-items: center; }
