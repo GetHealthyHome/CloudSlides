@@ -18,7 +18,7 @@
 
   R.injectCSS(document);
 
-  var PRESETS = ['#ffffff', '#f5f5f7', '#d1d1d6', '#8e8e93', '#1d1d1f', '#14213d', '#1f2f55', '#0a84ff', '#e8f1ff', '#34c759', '#ff9f0a', '#ff3b30', '#5e5ce6', '#bf5af2'];
+  var PRESETS = T.PALETTE; // [{ name, hex }]
 
   var state = {
     doc: null,
@@ -797,8 +797,8 @@
     var swatches = h('div', { class: 'swatches' });
     if (allowNone) swatches.appendChild(h('button', { type: 'button', class: 'sw none', title: 'None (transparent)', 'aria-label': 'No color', onclick: function () { apply('none'); } }));
     PRESETS.forEach(function (c) {
-      var b = h('button', { type: 'button', class: 'sw', title: c, 'aria-label': 'Color ' + c, onclick: function () { apply(c); } });
-      b.style.background = c;
+      var b = h('button', { type: 'button', class: 'sw', title: c.name + ' ' + c.hex, 'aria-label': c.name, onclick: function () { apply(c.hex); } });
+      b.style.background = c.hex;
       swatches.appendChild(b);
     });
     return h('div', { class: 'color-field' },
@@ -871,7 +871,7 @@
     return elementTitle(el);
   }
 
-  var LAYER_ICON = { text: 'T', image: '▣', line: '╱' };
+  var LAYER_ICON = { text: 'T', image: '▣', line: '╱', chart: '▮' };
 
   // Stack of items on this slide, front-most first (like PowerPoint's Selection Pane).
   function renderLayers(wrap, t) {
@@ -945,7 +945,7 @@
     wrap.appendChild(h('h2', { text: 'Page' }));
     wrap.appendChild(h('p', { class: 'note', text: 'US Letter landscape, 11 × 8.5 in. Every slide prints on exactly one page. Items can’t be dragged off the page.' }));
     wrap.appendChild(h('h2', { text: 'Shortcuts' }));
-    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · L line (drag to draw) · I image · Ctrl/⌘ ] / [ bring forward / send backward (Shift = all the way) · Alt/Option-click selects the item underneath · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
+    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · L line (drag to draw) · G bar chart · I image · Ctrl/⌘ ] / [ bring forward / send backward (Shift = all the way) · Alt/Option-click selects the item underneath · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
   }
 
   function projectValues(key) {
@@ -959,6 +959,7 @@
   function elementTitle(el) {
     if (el.type === 'text') return 'Text box';
     if (el.type === 'line') return el.capEnd === 'arrow' || el.capStart === 'arrow' ? 'Arrow' : 'Line';
+    if (el.type === 'chart') return 'Bar chart';
     if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo slot' : 'Image';
     return (Number(el.radius) || 0) > 0 ? 'Rounded box' : 'Square box';
   }
@@ -1013,6 +1014,7 @@
     if (el.type === 'text') textInspector(wrap, el);
     if (el.type === 'image') imageInspector(wrap, el);
     if (isLine(el)) { lineInspector(wrap, el); return; }
+    if (el.type === 'chart') chartInspector(wrap, el);
 
     wrap.appendChild(h('h2', { text: el.type === 'shape' ? 'Box' : 'Box style' }));
     wrap.appendChild(row('Corners', seg([['square', 'Square'], ['round', 'Rounded']], (Number(el.radius) || 0) > 0 ? 'round' : 'square', function (v) {
@@ -1032,6 +1034,49 @@
     var op = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(el.opacity == null ? 1 : el.opacity), 'aria-label': 'Opacity' });
     op.addEventListener('input', function () { setProp(el, 'opacity', parseFloat(op.value)); });
     wrap.appendChild(row('Opacity', op));
+  }
+
+  function chartInspector(wrap, el) {
+    wrap.appendChild(h('h2', { text: 'Bars' }));
+    // Suggest {{field}} tokens in the value boxes so bars can come from project data.
+    var dl = h('datalist', { id: 'cs-field-tokens' });
+    D.fieldPaths(state.project).forEach(function (f) { dl.appendChild(h('option', { value: '{{' + f + '}}' })); });
+    wrap.appendChild(dl);
+    var table = h('div', { class: 'bars' },
+      h('div', { class: 'bars-head' }, h('span', { text: 'Label' }), h('span', { text: 'Value' }), h('span')));
+    el.bars.forEach(function (b, i) {
+      var lab = h('input', { type: 'text', value: b.label, 'aria-label': 'Bar ' + (i + 1) + ' label' });
+      lab.addEventListener('input', function () { change(function () { b.label = lab.value; }, { key: 'bars:' + el.id, inspector: false }); });
+      var val = h('input', { type: 'text', value: String(b.value), list: 'cs-field-tokens', inputmode: 'decimal', placeholder: '0 or {{field}}', 'aria-label': 'Bar ' + (i + 1) + ' value' });
+      val.addEventListener('input', function () { change(function () { b.value = val.value; }, { key: 'bars:' + el.id, inspector: false }); });
+      table.appendChild(h('div', { class: 'bars-row' }, lab, val,
+        h('button', { type: 'button', class: 'icon-btn', title: 'Remove bar', 'aria-label': 'Remove bar ' + (i + 1), disabled: el.bars.length <= 1, onclick: function () {
+          change(function () { el.bars.splice(i, 1); });
+        } }, '✕')));
+    });
+    wrap.appendChild(table);
+    wrap.appendChild(h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn sm', disabled: el.bars.length >= 24, onclick: function () {
+        change(function () { el.bars.push({ label: 'Item ' + String.fromCharCode(65 + el.bars.length % 26), value: '50' }); });
+      } }, '+ Add bar')));
+    wrap.appendChild(h('p', { class: 'note', text: 'Values can be numbers or project fields such as {{payload.blower_door_cfm50}}. Symbols like $ and commas are ignored.' }));
+
+    wrap.appendChild(h('h2', { text: 'Chart style' }));
+    wrap.appendChild(colorField('Bar color', el.barColor || '#2f7d45', false, function (v) { setProp(el, 'barColor', v); }));
+    wrap.appendChild(colorField('Text color', el.color || '#4a4a4a', false, function (v) { setProp(el, 'color', v); }));
+    wrap.appendChild(row('Text pt', numInput(el.fontSize || 10, 1, 6, 36, function (v) { setProp(el, 'fontSize', v); })));
+    var pre = h('input', { type: 'text', value: el.prefix || '', placeholder: 'e.g. $' });
+    pre.addEventListener('input', function () { setProp(el, 'prefix', pre.value); });
+    wrap.appendChild(row('Prefix', pre));
+    var suf = h('input', { type: 'text', value: el.suffix || '', placeholder: 'e.g. % or CFM' });
+    suf.addEventListener('input', function () { setProp(el, 'suffix', suf.value); });
+    wrap.appendChild(row('Suffix', suf));
+    wrap.appendChild(row('Decimals', numInput(el.decimals || 0, 1, 0, 4, function (v) { setProp(el, 'decimals', Math.round(v)); })));
+    [['showValues', 'Values on bars'], ['showGrid', 'Gridlines'], ['showAxis', 'Value axis']].forEach(function (o) {
+      var cb = h('input', { type: 'checkbox', checked: el[o[0]] !== false });
+      cb.addEventListener('change', function () { change(function () { el[o[0]] = cb.checked; }, { inspector: false }); });
+      wrap.appendChild(h('label', { class: 'check-row' }, cb, ' ' + o[1]));
+    });
   }
 
   function lineInspector(wrap, el) {
@@ -1439,7 +1484,7 @@
       change(function () { moveBy(el, arrows[key][0] * step, arrows[key][1] * step); }, { key: 'nudge:' + el.id });
       return;
     }
-    var adds = { t: 'text', b: 'box', r: 'round', i: 'image', l: 'line' };
+    var adds = { t: 'text', b: 'box', r: 'round', i: 'image', l: 'line', g: 'chart' };
     if (adds[key]) { e.preventDefault(); addElement(adds[key]); }
   });
 
