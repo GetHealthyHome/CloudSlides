@@ -21,6 +21,8 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
   - square-corner boxes
   - rounded boxes (25 px default radius, adjustable)
   - image / photo slots (JPG or PNG upload, a project photo, or an image URL field)
+  - lines and arrows: press **L** or click **Line**, then drag on the slide. Hold Shift for straight or 45° lines. Choose solid, dashed or dotted, and add an arrow at one end or both.
+- **Layers.** Items stack front-to-back, so text can sit on top of a box or a photo. Use the **Layers** list in the right panel, the Bring forward / Send backward buttons, or Ctrl/⌘ `]` and `[` (add Shift to go all the way to the front or back). Alt/Option-click selects the item underneath.
 - **A color picker on every item** for fill, border, text color and slide background: a native color wheel, a hex field, preset swatches, and "none".
 - **Resolution-independent.** Positions are stored in inches and images at their original resolution. Slides are drawn at physical size and only scaled on screen, so resizing never blurs anything.
 - **Master deck.** Put templates in any order, and use the same template as many times as you like. A template can **repeat** to make one slide per photo zone or per group of N photos.

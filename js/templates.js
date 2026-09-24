@@ -28,6 +28,10 @@
         radius: kind === 'round' ? ROUND_RADIUS : 0
       });
     }
+    if (kind === 'line') {
+      var lx = p.x != null ? p.x : 1, ly = p.y != null ? p.y : 1;
+      return { id: base.id, type: 'line', x1: lx, y1: ly, x2: lx + 3, y2: ly, stroke: '#1d1d1f', strokeWidth: 1.5, dash: 'solid', capStart: 'none', capEnd: 'none', opacity: 1 };
+    }
     if (kind === 'image') {
       return Object.assign(base, {
         type: 'image', w: 4, h: 3, src: '', alt: '', fit: 'cover', position: 'center',
