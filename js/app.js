@@ -29,7 +29,8 @@
     zoom: 'fit',
     z: 1,
     dataPreview: true,
-    clipboard: null
+    clipboard: null,
+    tool: null // 'line' while drawing a line
   };
   var history = { undo: [], redo: [], lastKey: null, lastTime: 0 };
 
@@ -141,6 +142,22 @@
     return t.elements.filter(function (e) { return e.id === state.selectedId; })[0] || null;
   }
   function grid() { return state.doc.grid; }
+  function isLine(el) { return el && el.type === 'line'; }
+  // Bounding box in inches for any element (lines store two end points).
+  function boxOf(el) { return isLine(el) ? R.lineBox(el) : { x: el.x, y: el.y, w: el.w, h: el.h }; }
+
+  // Move an element by (dx, dy) inches, keeping all of it on the page.
+  function moveBy(el, dx, dy) {
+    var b = boxOf(el);
+    var nx = clamp(b.x + dx, 0, PAGE_W - b.w), ny = clamp(b.y + dy, 0, PAGE_H - b.h);
+    dx = nx - b.x; dy = ny - b.y;
+    if (isLine(el)) {
+      el.x1 = round3(el.x1 + dx); el.x2 = round3(el.x2 + dx);
+      el.y1 = round3(el.y1 + dy); el.y2 = round3(el.y2 + dy);
+    } else {
+      el.x = round3(el.x + dx); el.y = round3(el.y + dy);
+    }
+  }
   function snapV(v) {
     var g = grid();
     return g.snap ? round3(Math.round(v / g.size) * g.size) : round3(v);
@@ -269,10 +286,28 @@
 
   var HANDLES = [['nw', 0, 0], ['n', 50, 0], ['ne', 100, 0], ['e', 100, 50], ['se', 100, 100], ['s', 50, 100], ['sw', 0, 100], ['w', 0, 50]];
 
+  function lineLength(el) { return Math.sqrt(Math.pow(el.x2 - el.x1, 2) + Math.pow(el.y2 - el.y1, 2)); }
+
+  function renderLineSelection(el, showSize) {
+    [['p1', el.x1, el.y1], ['p2', el.x2, el.y2]].forEach(function (p) {
+      var n = h('div', { class: 'handle end', 'data-h': p[0], title: 'Drag to move this end (Shift = straight / 45°)' });
+      n.style.left = p[1] + 'in';
+      n.style.top = p[2] + 'in';
+      selLayer.appendChild(n);
+    });
+    if (showSize) {
+      var tip = h('div', { class: 'size-tip', text: fmtIn(lineLength(el)) + ' in' });
+      tip.style.left = ((el.x1 + el.x2) / 2) + 'in';
+      tip.style.top = Math.max(el.y1, el.y2) + 'in';
+      selLayer.appendChild(tip);
+    }
+  }
+
   function renderSelection(showSize) {
     selLayer.innerHTML = '';
     var el = sel();
     if (!el) return;
+    if (isLine(el)) return renderLineSelection(el, showSize);
     var box = h('div', { class: 'sel-box' });
     box.style.left = el.x + 'in';
     box.style.top = el.y + 'in';
@@ -298,6 +333,7 @@
   function updateNodeGeometry(el) {
     var node = slideHost.querySelector('[data-id="' + el.id + '"]');
     if (!node) return;
+    if (isLine(el)) { node.replaceWith(R.renderElement(el, {}, { mode: 'edit' })); return; }
     node.style.left = el.x + 'in';
     node.style.top = el.y + 'in';
     node.style.width = el.w + 'in';
@@ -329,12 +365,35 @@
     el.x = round3(L); el.y = round3(Tp); el.w = round3(Rt - L); el.h = round3(B - Tp);
   }
 
-  function startDrag(e, kind, hd) {
+  function dragLineEnd(el, s, hd, dx, dy, constrain) {
+    var mine = hd === 'p1' ? ['x1', 'y1'] : ['x2', 'y2'];
+    var other = hd === 'p1' ? [s.x2, s.y2] : [s.x1, s.y1];
+    var nx = clamp(snapV(s[mine[0]] + dx), 0, PAGE_W);
+    var ny = clamp(snapV(s[mine[1]] + dy), 0, PAGE_H);
+    if (constrain) {
+      // Lock to 0°, 45° or 90° from the other end, keeping the end on the grid.
+      var ddx = nx - other[0], ddy = ny - other[1];
+      var oct = Math.round(Math.atan2(ddy, ddx) / (Math.PI / 4));
+      if (oct % 4 === 0) ny = other[1];
+      else if (Math.abs(oct) === 2) nx = other[0];
+      else {
+        var d = Math.min(snapV((Math.abs(ddx) + Math.abs(ddy)) / 2),
+          ddx > 0 ? PAGE_W - other[0] : other[0], ddy > 0 ? PAGE_H - other[1] : other[1]);
+        nx = other[0] + (ddx < 0 ? -d : d);
+        ny = other[1] + (ddy < 0 ? -d : d);
+      }
+    }
+    el[mine[0]] = round3(nx);
+    el[mine[1]] = round3(ny);
+  }
+
+  function startDrag(e, kind, hd, opts) {
     var el = sel();
     if (!el) return;
     e.preventDefault();
+    opts = opts || {};
     var start = { x: e.clientX, y: e.clientY, el: clone(el) };
-    var moved = false;
+    var moved = !!opts.created; // a freshly drawn line already has its undo point
     try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 
     function onMove(ev) {
@@ -342,9 +401,15 @@
       if (!moved) { pushHistory(); moved = true; }
       var dx = (ev.clientX - start.x) / (DPI * state.z);
       var dy = (ev.clientY - start.y) / (DPI * state.z);
-      if (kind === 'move') {
+      if (kind === 'move' && isLine(el)) {
+        // Snap the first end to the grid; the other end keeps its offset.
+        Object.assign(el, { x1: start.el.x1, y1: start.el.y1, x2: start.el.x2, y2: start.el.y2 });
+        moveBy(el, snapV(start.el.x1 + dx) - start.el.x1, snapV(start.el.y1 + dy) - start.el.y1);
+      } else if (kind === 'move') {
         el.x = round3(clamp(snapV(start.el.x + dx), 0, PAGE_W - el.w));
         el.y = round3(clamp(snapV(start.el.y + dy), 0, PAGE_H - el.h));
+      } else if (hd === 'p1' || hd === 'p2') {
+        dragLineEnd(el, start.el, hd, dx, dy, ev.shiftKey);
       } else {
         resizeFrom(el, start.el, hd, dx, dy, ev.shiftKey);
       }
@@ -355,6 +420,13 @@
       stage.removeEventListener('pointermove', onMove);
       stage.removeEventListener('pointerup', onUp);
       stage.removeEventListener('pointercancel', onUp);
+      if (opts.created && lineLength(el) < 0.1) {
+        // A click without a drag drops a 3 in line starting at that point.
+        el.x2 = round3(Math.min(PAGE_W, el.x1 + 3));
+        if (el.x2 - el.x1 < 1) el.x1 = round3(el.x2 - 3);
+        el.y2 = el.y1;
+        updateNodeGeometry(el);
+      }
       if (moved) {
         save();
         renderSelection();
@@ -370,9 +442,11 @@
   stage.addEventListener('pointerdown', function (e) {
     if (e.button !== 0 || !tpl()) return;
     if (e.target.closest('[contenteditable="true"],[contenteditable="plaintext-only"]')) return;
+    if (state.tool === 'line') { beginLine(e); return; }
     var handle = e.target.closest('.handle');
     if (handle) { startDrag(e, 'resize', handle.getAttribute('data-h')); return; }
     var node = e.target.closest('#slideHost .cs-el');
+    if (node && e.altKey) node = nodeBelow(e, node) || node;
     if (node) {
       select(node.getAttribute('data-id'));
       startDrag(e, 'move');
@@ -380,6 +454,40 @@
     }
     select(null);
   });
+
+  // Alt/Option-click picks the next item down in the stack under the pointer,
+  // so a box hidden behind text (or text behind a photo) can still be grabbed.
+  function nodeBelow(e, top) {
+    var stack = document.elementsFromPoint(e.clientX, e.clientY)
+      .map(function (n) { return n.closest && n.closest('#slideHost .cs-el'); })
+      .filter(function (n, i, a) { return n && a.indexOf(n) === i; });
+    var cur = stack.indexOf(slideHost.querySelector('[data-id="' + state.selectedId + '"]'));
+    if (cur < 0) return top;
+    return stack[(cur + 1) % stack.length];
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    stage.classList.toggle('drawing', tool === 'line');
+    var b = $('[data-add="line"]');
+    if (b) b.setAttribute('aria-pressed', tool === 'line' ? 'true' : 'false');
+    if (tool === 'line') toast('Drag on the slide to draw a line · Shift keeps it straight');
+  }
+
+  function beginLine(e) {
+    var t = tpl();
+    var rect = stage.getBoundingClientRect();
+    var px = clamp(snapV((e.clientX - rect.left) / (DPI * state.z)), 0, PAGE_W);
+    var py = clamp(snapV((e.clientY - rect.top) / (DPI * state.z)), 0, PAGE_H);
+    var el = T.makeElement('line', { x: px, y: py });
+    el.x2 = px; el.y2 = py;
+    pushHistory();
+    t.elements.push(el);
+    state.selectedId = el.id;
+    setTool(null);
+    renderStage();
+    startDrag(e, 'resize', 'p2', { created: true });
+  }
 
   stage.addEventListener('dblclick', function (e) {
     var node = e.target.closest('#slideHost .cs-text');
@@ -470,6 +578,7 @@
   function addElement(kind) {
     var t = tpl();
     if (!t) return toast('Create a template first');
+    if (kind === 'line') { setTool(state.tool === 'line' ? null : 'line'); return; }
     var el = T.makeElement(kind);
     if (kind === 'image') {
       el.bind.index = t.elements.filter(function (e) { return e.type === 'image' && e.bind && e.bind.kind === 'photo'; }).length;
@@ -495,13 +604,12 @@
     var el = clone(src);
     el.id = T.uid('e');
     var g = grid().snap ? grid().size : 0.25;
-    el.x = round3(clamp(el.x + g, 0, PAGE_W - el.w));
-    el.y = round3(clamp(el.y + g, 0, PAGE_H - el.h));
+    moveBy(el, g, g);
     change(function () { t.elements.push(el); state.selectedId = el.id; });
   }
 
-  function reorder(where) {
-    var t = tpl(), el = sel();
+  function reorder(where, target) {
+    var t = tpl(), el = target || sel();
     if (!el) return;
     change(function () {
       var arr = t.elements;
@@ -746,8 +854,48 @@
       return;
     }
     var el = sel();
-    if (el) renderElementInspector(wrap, t, el);
-    else renderTemplateInspector(wrap, t);
+    if (el) {
+      renderElementInspector(wrap, t, el);
+      renderLayers(wrap, t);
+    } else {
+      renderTemplateInspector(wrap, t);
+    }
+  }
+
+  function layerLabel(el) {
+    if (el.type === 'text') {
+      var txt = String(el.text || '').replace(/\s+/g, ' ').trim();
+      return txt ? (txt.length > 26 ? txt.slice(0, 25) + '…' : txt) : 'Empty text';
+    }
+    if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo #' + ((Number(el.bind.index) || 0) + 1) + (el.bind.zone ? ' · ' + el.bind.zone : '') : (el.alt || 'Image');
+    return elementTitle(el);
+  }
+
+  var LAYER_ICON = { text: 'T', image: '▣', line: '╱' };
+
+  // Stack of items on this slide, front-most first (like PowerPoint's Selection Pane).
+  function renderLayers(wrap, t) {
+    wrap.appendChild(h('h2', { text: 'Layers' }));
+    if (!t.elements.length) {
+      wrap.appendChild(h('p', { class: 'note', text: 'Nothing on this slide yet.' }));
+      return;
+    }
+    var list = h('ol', { class: 'layers', 'aria-label': 'Layers, front to back' });
+    var n = t.elements.length;
+    t.elements.slice().reverse().forEach(function (el, i) {
+      var swatch = h('span', { class: 'layer-icon', 'aria-hidden': 'true', text: LAYER_ICON[el.type] || '' });
+      if (el.type === 'shape') {
+        swatch.style.background = el.fill && el.fill !== 'none' ? el.fill : '#fff';
+        swatch.style.borderRadius = (Number(el.radius) || 0) > 0 ? '4px' : '0';
+      }
+      list.appendChild(h('li', { class: el.id === state.selectedId ? 'active' : '' },
+        h('button', { type: 'button', class: 'layer-name', title: 'Select', onclick: function () { select(el.id); } }, swatch, h('span', { class: 'layer-text', text: layerLabel(el) })),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Bring forward', 'aria-label': 'Bring ' + layerLabel(el) + ' forward', disabled: i === 0, onclick: function () { reorder('forward', el); } }, '↑'),
+        h('button', { type: 'button', class: 'icon-btn', title: 'Send backward', 'aria-label': 'Send ' + layerLabel(el) + ' backward', disabled: i === n - 1, onclick: function () { reorder('backward', el); } }, '↓')
+      ));
+    });
+    wrap.appendChild(list);
+    wrap.appendChild(h('p', { class: 'note', text: 'Top of the list is in front. To put text on a box or photo, keep the text above it. Alt/Option-click on the slide picks the item underneath.' }));
   }
 
   function renderTemplateInspector(wrap, t) {
@@ -793,10 +941,11 @@
       h('button', { type: 'button', class: 'btn sm danger', onclick: function () { deleteTemplate(t); } }, 'Delete')
     ));
 
+    renderLayers(wrap, t);
     wrap.appendChild(h('h2', { text: 'Page' }));
     wrap.appendChild(h('p', { class: 'note', text: 'US Letter landscape, 11 × 8.5 in. Every slide prints on exactly one page. Items can’t be dragged off the page.' }));
     wrap.appendChild(h('h2', { text: 'Shortcuts' }));
-    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · I image · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
+    wrap.appendChild(h('p', { class: 'note', text: 'T text · B box · R rounded · L line (drag to draw) · I image · Ctrl/⌘ ] / [ bring forward / send backward (Shift = all the way) · Alt/Option-click selects the item underneath · arrows nudge (Shift ×4) · Delete remove · Ctrl/⌘ D duplicate · Ctrl/⌘ C / V copy/paste · Ctrl/⌘ Z undo · Shift-drag a corner keeps proportions · double-click text to edit.' }));
   }
 
   function projectValues(key) {
@@ -809,6 +958,7 @@
 
   function elementTitle(el) {
     if (el.type === 'text') return 'Text box';
+    if (el.type === 'line') return el.capEnd === 'arrow' || el.capStart === 'arrow' ? 'Arrow' : 'Line';
     if (el.type === 'image') return el.bind && el.bind.kind === 'photo' ? 'Photo slot' : 'Image';
     return (Number(el.radius) || 0) > 0 ? 'Rounded box' : 'Square box';
   }
@@ -819,7 +969,16 @@
     // Position and size, in inches.
     var g = grid().snap ? grid().size : 0.01;
     var xywh = h('div', { class: 'xywh' });
-    [['X', 'x', PAGE_W], ['Y', 'y', PAGE_H], ['W', 'w', PAGE_W], ['H', 'h', PAGE_H]].forEach(function (f) {
+    var geomFields = isLine(el)
+      ? [['X1', 'x1', PAGE_W], ['Y1', 'y1', PAGE_H], ['X2', 'x2', PAGE_W], ['Y2', 'y2', PAGE_H]]
+      : [['X', 'x', PAGE_W], ['Y', 'y', PAGE_H], ['W', 'w', PAGE_W], ['H', 'h', PAGE_H]];
+    geomFields.forEach(function (f) {
+      if (isLine(el)) {
+        var li = numInput(el[f[1]], g, 0, f[2], function (v) { change(function () { el[f[1]] = round3(clamp(v, 0, f[2])); }, { key: 'geom:' + el.id }); }, 'inches');
+        li.setAttribute('aria-label', f[0] + ' in inches');
+        xywh.appendChild(h('label', null, f[0], li));
+        return;
+      }
       var inp = numInput(el[f[1]], g, 0, f[2], function (v) {
         change(function () {
           el[f[1]] = round3(v);
@@ -833,16 +992,18 @@
       xywh.appendChild(h('label', null, f[0], inp));
     });
     wrap.appendChild(xywh);
+    if (isLine(el)) wrap.appendChild(h('p', { class: 'note', text: 'Length ' + fmtIn(lineLength(el)) + ' in. Drag an end to reshape; hold Shift for straight or 45° lines.' }));
     wrap.appendChild(h('div', { class: 'btn-row' },
-      h('button', { type: 'button', class: 'btn sm', title: 'Center horizontally on the page', onclick: function () { change(function () { el.x = round3((PAGE_W - el.w) / 2); }); } }, 'Center ↔'),
-      h('button', { type: 'button', class: 'btn sm', title: 'Center vertically on the page', onclick: function () { change(function () { el.y = round3((PAGE_H - el.h) / 2); }); } }, 'Center ↕'),
-      h('button', { type: 'button', class: 'btn sm', title: 'Fill the whole page', onclick: function () { change(function () { el.x = 0; el.y = 0; el.w = PAGE_W; el.h = PAGE_H; }); } }, 'Full page')
+      h('button', { type: 'button', class: 'btn sm', title: 'Center horizontally on the page', onclick: function () { change(function () { var b = boxOf(el); moveBy(el, (PAGE_W - b.w) / 2 - b.x, 0); }); } }, 'Center ↔'),
+      h('button', { type: 'button', class: 'btn sm', title: 'Center vertically on the page', onclick: function () { change(function () { var b = boxOf(el); moveBy(el, 0, (PAGE_H - b.h) / 2 - b.y); }); } }, 'Center ↕'),
+      isLine(el) ? null : h('button', { type: 'button', class: 'btn sm', title: 'Fill the whole page', onclick: function () { change(function () { el.x = 0; el.y = 0; el.w = PAGE_W; el.h = PAGE_H; }); } }, 'Full page')
     ));
+    wrap.appendChild(h('h2', { text: 'Layer order' }));
     wrap.appendChild(h('div', { class: 'btn-row' },
-      h('button', { type: 'button', class: 'btn sm', onclick: function () { reorder('front'); } }, 'To front'),
-      h('button', { type: 'button', class: 'btn sm', onclick: function () { reorder('forward'); } }, 'Forward'),
-      h('button', { type: 'button', class: 'btn sm', onclick: function () { reorder('backward'); } }, 'Backward'),
-      h('button', { type: 'button', class: 'btn sm', onclick: function () { reorder('back'); } }, 'To back')
+      h('button', { type: 'button', class: 'btn sm', title: 'Ctrl/⌘ Shift ]', onclick: function () { reorder('front'); } }, 'Bring to front'),
+      h('button', { type: 'button', class: 'btn sm', title: 'Ctrl/⌘ ]', onclick: function () { reorder('forward'); } }, 'Forward'),
+      h('button', { type: 'button', class: 'btn sm', title: 'Ctrl/⌘ [', onclick: function () { reorder('backward'); } }, 'Backward'),
+      h('button', { type: 'button', class: 'btn sm', title: 'Ctrl/⌘ Shift [', onclick: function () { reorder('back'); } }, 'Send to back')
     ));
     wrap.appendChild(h('div', { class: 'btn-row' },
       h('button', { type: 'button', class: 'btn sm', onclick: function () { pasteElement(el); } }, 'Duplicate'),
@@ -851,6 +1012,7 @@
 
     if (el.type === 'text') textInspector(wrap, el);
     if (el.type === 'image') imageInspector(wrap, el);
+    if (isLine(el)) { lineInspector(wrap, el); return; }
 
     wrap.appendChild(h('h2', { text: el.type === 'shape' ? 'Box' : 'Box style' }));
     wrap.appendChild(row('Corners', seg([['square', 'Square'], ['round', 'Rounded']], (Number(el.radius) || 0) > 0 ? 'round' : 'square', function (v) {
@@ -867,6 +1029,20 @@
       }, { key: 'stroke:' + el.id, inspector: false });
     }));
     wrap.appendChild(row('Border pt', numInput(el.strokeWidth || 0, 0.5, 0, 24, function (v) { setProp(el, 'strokeWidth', v); })));
+    var op = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(el.opacity == null ? 1 : el.opacity), 'aria-label': 'Opacity' });
+    op.addEventListener('input', function () { setProp(el, 'opacity', parseFloat(op.value)); });
+    wrap.appendChild(row('Opacity', op));
+  }
+
+  function lineInspector(wrap, el) {
+    wrap.appendChild(h('h2', { text: 'Line style' }));
+    wrap.appendChild(colorField('Color', el.stroke || '#1d1d1f', false, function (v) { setProp(el, 'stroke', v); }));
+    wrap.appendChild(row('Weight pt', numInput(el.strokeWidth || 1, 0.5, 0.25, 36, function (v) { setProp(el, 'strokeWidth', v); })));
+    wrap.appendChild(row('Style', seg([['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']], el.dash || 'solid', function (v) { change(function () { el.dash = v; }); })));
+    var ends = el.capStart === 'arrow' ? 'both' : (el.capEnd === 'arrow' ? 'end' : 'none');
+    wrap.appendChild(row('Arrows', seg([['none', 'None'], ['end', '→', 'Arrow at end'], ['both', '↔', 'Arrows at both ends']], ends, function (v) {
+      change(function () { el.capEnd = v === 'none' ? 'none' : 'arrow'; el.capStart = v === 'both' ? 'arrow' : 'none'; });
+    })));
     var op = h('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(el.opacity == null ? 1 : el.opacity), 'aria-label': 'Opacity' });
     op.addEventListener('input', function () { setProp(el, 'opacity', parseFloat(op.value)); });
     wrap.appendChild(row('Opacity', op));
@@ -1246,20 +1422,24 @@
     if (mod && key === 'd' && el) { e.preventDefault(); pasteElement(el); return; }
     if (mod && key === 'c' && el) { state.clipboard = clone(el); toast('Copied'); return; }
     if (mod && key === 'v' && state.clipboard) { e.preventDefault(); pasteElement(state.clipboard); return; }
+    // Layer order, as in PowerPoint / Figma: Ctrl/⌘ ] forward, [ backward, + Shift = all the way.
+    if (mod && el && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+      e.preventDefault();
+      var up = e.code === 'BracketRight';
+      reorder(e.shiftKey ? (up ? 'front' : 'back') : (up ? 'forward' : 'backward'));
+      return;
+    }
     if (mod || e.altKey) return;
     if ((key === 'Delete' || key === 'Backspace') && el) { e.preventDefault(); deleteElement(); return; }
-    if (key === 'Escape') { select(null); return; }
+    if (key === 'Escape') { if (state.tool) setTool(null); else select(null); return; }
     var arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (arrows[key] && el) {
       e.preventDefault();
       var step = (grid().snap ? grid().size : 0.0625) * (e.shiftKey ? 4 : 1);
-      change(function () {
-        el.x = round3(clamp(el.x + arrows[key][0] * step, 0, PAGE_W - el.w));
-        el.y = round3(clamp(el.y + arrows[key][1] * step, 0, PAGE_H - el.h));
-      }, { key: 'nudge:' + el.id });
+      change(function () { moveBy(el, arrows[key][0] * step, arrows[key][1] * step); }, { key: 'nudge:' + el.id });
       return;
     }
-    var adds = { t: 'text', b: 'box', r: 'round', i: 'image' };
+    var adds = { t: 'text', b: 'box', r: 'round', i: 'image', l: 'line' };
     if (adds[key]) { e.preventDefault(); addElement(adds[key]); }
   });
 

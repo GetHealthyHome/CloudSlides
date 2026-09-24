@@ -121,6 +121,8 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .tool:hover { background: #f0f0f3; border-color: var(--line); }
 .tool svg { width: 18px; height: 18px; fill: currentColor; }
 .tool.icon { padding: 4px 6px; }
+.tool[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: #0060df; }
+.stage.drawing, .stage.drawing * { cursor: crosshair !important; }
 .tlabel, .tcheck { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); padding: 0 4px; }
 .tlabel select, #zoom { border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px; background: #fff; color: var(--text); }
 
@@ -153,6 +155,7 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
   border: calc(1.5px / var(--z)) solid var(--accent); border-radius: calc(2px / var(--z)); pointer-events: auto;
   transform: translate(-50%, -50%);
 }
+.handle.end { border-radius: 50%; cursor: move; width: calc(12px / var(--z)); height: calc(12px / var(--z)); }
 .handle[data-h="nw"], .handle[data-h="se"] { cursor: nwse-resize; }
 .handle[data-h="ne"], .handle[data-h="sw"] { cursor: nesw-resize; }
 .handle[data-h="n"], .handle[data-h="s"] { cursor: ns-resize; }
@@ -183,6 +186,15 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .seg button[aria-pressed="true"] { background: var(--accent-soft); color: #0060df; font-weight: 600; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .note { font-size: 12px; color: var(--muted); line-height: 1.4; margin: 4px 0 10px; }
+
+/* Layers */
+.layers { list-style: none; margin: 0 0 6px; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.layers li { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 0; border-top: 1px solid var(--line); }
+.layers li:first-child { border-top: 0; }
+.layers li.active { background: var(--accent-soft); }
+.layer-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 5px 8px; text-align: left; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.layer-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.layer-icon { width: 18px; height: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(0,0,0,.18); font-size: 10px; font-weight: 700; color: var(--muted); background: #fff; }
 
 /* Color picker */
 .color-field { margin-bottom: 10px; }

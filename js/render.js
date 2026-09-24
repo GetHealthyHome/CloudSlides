@@ -17,6 +17,9 @@
       '.cs-slide{position:relative;width:11in;height:8.5in;box-sizing:border-box;overflow:hidden;background:#fff;font-family:' + FONT_STACK + ';color:#1d1d1f;-webkit-print-color-adjust:exact;print-color-adjust:exact;}',
       '.cs-slide *{box-sizing:border-box;}',
       '.cs-el{position:absolute;overflow:hidden;}',
+      '.cs-line{left:0;top:0;width:11in;height:8.5in;overflow:visible;pointer-events:none;}',
+      '.cs-line>svg{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;}',
+      '.cs-line .cs-hit{pointer-events:stroke;}',
       '.cs-text{display:flex;flex-direction:column;white-space:pre-wrap;overflow-wrap:break-word;}',
       '.cs-text>.cs-tx{width:100%;}',
       '.cs-img>img{display:block;width:100%;height:100%;}',
@@ -218,9 +221,70 @@
       return 'Image';
     }
 
+    var SVGNS = 'http://www.w3.org/2000/svg';
+
+    function svgEl(doc, tag, attrs) {
+      var n = doc.createElementNS(SVGNS, tag);
+      Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+      return n;
+    }
+
+    // Bounding box of a line in inches (used by the editor and exports).
+    function lineBox(el) {
+      return {
+        x: Math.min(el.x1, el.x2), y: Math.min(el.y1, el.y2),
+        w: Math.abs(el.x2 - el.x1), h: Math.abs(el.y2 - el.y1)
+      };
+    }
+
+    /*
+     * A line is drawn in an SVG that covers the page, in inch units
+     * (viewBox 0 0 11 8.5), so it stays razor sharp at any zoom or in print.
+     * Only the stroke itself catches clicks, so items underneath stay clickable.
+     */
+    function renderLine(el, doc) {
+      var node = doc.createElement('div');
+      node.className = 'cs-el cs-line';
+      node.setAttribute('data-id', el.id);
+      if (el.opacity != null && el.opacity < 1) node.style.opacity = el.opacity;
+      var color = el.stroke && el.stroke !== 'none' ? el.stroke : '#1d1d1f';
+      var sw = Math.max(0.25, Number(el.strokeWidth) || 1) / 72; // pt -> in
+      var svg = svgEl(doc, 'svg', { viewBox: '0 0 ' + PAGE.width + ' ' + PAGE.height, preserveAspectRatio: 'none', 'aria-hidden': 'true' });
+      var x1 = el.x1, y1 = el.y1, x2 = el.x2, y2 = el.y2;
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+      var ux = dx / len, uy = dy / len;
+      var head = Math.max(0.09, sw * 4.5);
+      var heads = [];
+      if (el.capEnd === 'arrow') heads.push([x2, y2, ux, uy]);
+      if (el.capStart === 'arrow') heads.push([x1, y1, -ux, -uy]);
+      // Pull the stroke back so it does not poke through the arrow tip.
+      var sx1 = x1, sy1 = y1, sx2 = x2, sy2 = y2;
+      if (el.capEnd === 'arrow' && len > head) { sx2 = x2 - ux * head * 0.7; sy2 = y2 - uy * head * 0.7; }
+      if (el.capStart === 'arrow' && len > head) { sx1 = x1 + ux * head * 0.7; sy1 = y1 + uy * head * 0.7; }
+      var dash = { dashed: (sw * 4) + ' ' + (sw * 3), dotted: '0 ' + (sw * 2.2) }[el.dash] || null;
+      var attrs = { x1: sx1, y1: sy1, x2: sx2, y2: sy2, stroke: color, 'stroke-width': sw, 'stroke-linecap': el.dash === 'dotted' ? 'round' : 'butt', fill: 'none' };
+      if (dash) attrs['stroke-dasharray'] = dash;
+      svg.appendChild(svgEl(doc, 'line', attrs));
+      heads.forEach(function (hd) {
+        var tx = hd[0], ty = hd[1], hx = hd[2], hy = hd[3];
+        var bx = tx - hx * head, by = ty - hy * head;
+        var px = -hy * head * 0.45, py = hx * head * 0.45;
+        svg.appendChild(svgEl(doc, 'polygon', {
+          points: tx + ',' + ty + ' ' + (bx + px) + ',' + (by + py) + ' ' + (bx - px) + ',' + (by - py),
+          fill: color
+        }));
+      });
+      // Wide invisible stroke so thin lines are easy to click in the editor.
+      svg.appendChild(svgEl(doc, 'line', { class: 'cs-hit', x1: x1, y1: y1, x2: x2, y2: y2, stroke: 'transparent', 'stroke-width': Math.max(sw, 0.12) }));
+      node.appendChild(svg);
+      return node;
+    }
+
     // opts: { mode: 'edit'|'preview'|'final', data: bool }
     function renderElement(el, ctx, opts, doc) {
       doc = doc || document;
+      if (el.type === 'line') return renderLine(el, doc);
       var node = doc.createElement('div');
       node.className = 'cs-el cs-' + el.type;
       node.setAttribute('data-id', el.id);
@@ -421,6 +485,7 @@
       countPhotoSlots: countPhotoSlots,
       expandDeck: expandDeck,
       renderElement: renderElement,
+      lineBox: lineBox,
       renderSlide: renderSlide,
       renderDeck: renderDeck,
       buildPrintRoot: buildPrintRoot,
