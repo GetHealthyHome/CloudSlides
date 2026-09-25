@@ -205,20 +205,32 @@
         var ph = pool[Number(b.index) || 0];
         return ph ? { src: ph.url, alt: ph.label || ph.zone || 'Project photo' } : null;
       }
-      if (b.kind === 'field' && b.field) {
+      if (b.kind === 'field') {
+        if (!b.field) return null; // no field chosen yet: never fall back to an old uploaded file
+        // 1) a URL stored in the project data under that field (e.g. payload.front_elevation)
         var v = get(ctx, b.field);
-        return v ? { src: String(v), alt: b.field } : null;
+        if (v == null && ctx.project) v = get(ctx.project.payload, b.field);
+        if (typeof v === 'string' && /^(https?:|data:image\/|blob:)/.test(v)) return { src: v, alt: b.label || b.field };
+        // 2) otherwise the project photo whose label, tag or zone matches the field name
+        var key = fieldKey(b.field);
+        var hit = (ctx.photos || []).filter(function (p) {
+          return fieldKey(p.label) === key || fieldKey(p.tag) === key || fieldKey(p.zone) === key;
+        })[0];
+        return hit ? { src: hit.url, alt: hit.label || b.label || b.field } : null;
       }
       return el.src ? { src: el.src, alt: el.alt || '' } : null;
     }
+
+    // "Front Elevation", "front_elevation" and "front-elevation" all match.
+    function fieldKey(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 
     function describeSlot(el) {
       var b = el.bind || {};
       if (b.kind === 'photo') {
         return 'Photo #' + ((Number(b.index) || 0) + 1) + (b.zone ? ' · ' + b.zone : '') + (b.tag ? ' · ' + b.tag : '');
       }
-      if (b.kind === 'field') return 'Image field: ' + (b.field || '?');
-      return 'Image';
+      if (b.kind === 'field') return b.field ? 'Photo field: ' + (b.label || b.field) : 'Choose a photo field';
+      return 'Double-click to add a JPG or PNG';
     }
 
     var SVGNS = 'http://www.w3.org/2000/svg';
@@ -584,6 +596,7 @@
       renderElement: renderElement,
       lineBox: lineBox,
       chartBars: chartBars,
+      fieldKey: fieldKey,
       renderSlide: renderSlide,
       renderDeck: renderDeck,
       buildPrintRoot: buildPrintRoot,

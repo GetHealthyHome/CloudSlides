@@ -20,7 +20,8 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
   - text boxes, using the San Francisco system font stack (`SF Pro` / `SF Hello` / `-apple-system`, falling back to Helvetica or Arial on other systems)
   - square-corner boxes
   - rounded boxes (25 px default radius, adjustable)
-  - image / photo slots (JPG or PNG upload, a project photo, or an image URL field)
+  - image / photo slots: upload a JPG or PNG (choose **File**, double-click the box, or drop a file onto it), or use a project photo
+  - photo fields: set an image's source to **Field** and pick from the deck's field list. Import the list under **Manage fields…** by pasting names (one per line, optional `key, Label`) or uploading a `.csv`, `.txt` or `.json` file. The list is saved with the deck. Each field can be placed on only one image slot in the deck; fields already used elsewhere are greyed out. A field fills from a URL in the project data with that name, or else from the project photo whose label, tag or zone matches it.
   - lines and arrows: press **L** or click **Line**, then drag on the slide. Hold Shift for straight or 45° lines. Choose solid, dashed or dotted, and add an arrow at one end or both.
   - simple vertical bar charts: press **G** or click **Chart**. Type a label and value for each bar; a value can be a number or a project field like `{{payload.blower_door_cfm50}}`. You can add a prefix/suffix (`$`, `%`, `CFM`), and turn value labels, gridlines and the value axis on or off.
 - **Brand palette.** The color pickers offer white, black, dark gray (`#4a4a4a`), light gray (`#d9d9d9`) and four greens (`#1b4d2b`, `#2f7d45`, `#5fae6e`, `#cfe8d4`), plus any custom hex. The swatch list lives in `PALETTE` in `js/templates.js`.
