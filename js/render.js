@@ -22,8 +22,8 @@
       '.cs-line .cs-hit{pointer-events:stroke;}',
       '.cs-text{display:flex;flex-direction:column;white-space:pre-wrap;overflow-wrap:break-word;}',
       '.cs-text>.cs-tx{width:100%;}',
-      '.cs-img>img{display:block;width:100%;height:100%;}',
-      '.cs-img.cs-empty{display:flex;align-items:center;justify-content:center;}',
+      '.cs-image>img{display:block;width:100%;height:100%;}',
+      '.cs-image.cs-empty{display:flex;align-items:center;justify-content:center;}',
       '.cs-print{display:none;}',
       /* viewer */
       '.cs-viewer{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;background:#111214;color:#f5f5f7;font-family:' + FONT_STACK + ';}',

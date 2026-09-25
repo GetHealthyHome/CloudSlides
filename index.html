@@ -19,7 +19,7 @@
     <button type="button" id="btnLibrary" class="btn" title="Shared template library (Ctrl/⌘ S saves)">
       <span class="dot" id="cloudDot"></span><span id="cloudLabel">Library</span>
     </button>
-    <button type="button" id="btnImport" class="btn">Import</button>
+    <button type="button" id="btnImport" class="btn" title="Import a PowerPoint / Google Slides (.pptx) file, or a CloudSlides deck (.json / .html)">Import</button>
     <div class="menu">
       <button type="button" id="btnExport" class="btn" aria-haspopup="true" aria-expanded="false">Export &#9662;</button>
       <div class="menu-pop" id="exportMenu" role="menu" hidden>
@@ -190,6 +190,32 @@
     </div>
   </dialog>
 
+  <dialog id="pptxDialog" class="dialog">
+    <form method="dialog" class="dlg-head">
+      <h2>Import PowerPoint</h2>
+      <button class="btn sm" value="close" aria-label="Close">&#10005;</button>
+    </form>
+    <div class="dlg-body">
+      <div class="current-project" id="pptxInfo"></div>
+      <div id="pptxOptions">
+        <h3>Where should the slides go?</h3>
+        <label class="radio-row"><input type="radio" name="pptxMode" value="new" checked> Start a new deck from this file</label>
+        <label class="radio-row"><input type="radio" name="pptxMode" value="add"> Add its slides to the deck that is open now</label>
+        <div id="pptxFitBox">
+          <h3>Page shape</h3>
+          <p class="muted" id="pptxFitNote"></p>
+          <label class="radio-row"><input type="radio" name="pptxFit" value="fit" checked> Keep proportions (adds space above and below)</label>
+          <label class="radio-row"><input type="radio" name="pptxFit" value="stretch"> Stretch to fill the Letter page</label>
+        </div>
+        <h3>Photo placeholders</h3>
+        <label class="radio-row"><input type="checkbox" id="pptxPhoto" checked> Turn <code>[Photo: …]</code> boxes into photo fields</label>
+        <div class="form-row" style="margin-top:14px"><button type="button" class="btn primary" id="pptxGo">Import slides</button></div>
+      </div>
+      <div id="pptxReport"></div>
+      <p class="error" id="pptxError" role="alert"></p>
+    </div>
+  </dialog>
+
   <dialog id="fieldsDialog" class="dialog">
     <form method="dialog" class="dlg-head">
       <h2>Photo fields</h2>
@@ -211,7 +237,7 @@
   </dialog>
   <input type="file" id="fileFields" accept=".csv,.txt,.json,text/csv,text/plain,application/json" hidden>
 
-  <input type="file" id="fileImport" accept=".json,.html,application/json,text/html" hidden>
+  <input type="file" id="fileImport" accept=".pptx,.json,.html,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/json,text/html" hidden>
   <input type="file" id="fileImage" accept="image/png,image/jpeg" hidden>
   <input type="file" id="fileProjectJSON" accept=".json,application/json" hidden>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -220,6 +246,7 @@
   <script src="js/data.js"></script>
   <script src="js/export.js"></script>
   <script src="js/templates.js"></script>
+  <script src="js/pptx.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
