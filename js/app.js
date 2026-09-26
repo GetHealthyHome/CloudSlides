@@ -1824,11 +1824,31 @@
     if (kind === 'pdf') printPDF();
   });
 
-  $('#btnImport').addEventListener('click', function () { $('#fileImport').value = ''; $('#fileImport').click(); });
+  $('#btnImport').addEventListener('click', openImportDialog);
   $('#fileImport').addEventListener('change', function () {
     var f = this.files && this.files[0];
-    if (!f) return;
+    if (f) handleImportFile(f);
+  });
+
+  // One entry point for every way a file arrives: drop box, picker, or dropped anywhere.
+  function handleImportFile(f) {
     if (/\.pptx$/i.test(f.name)) { openPptxImport(f); return; }
+    if (/\.(json|html?)$/i.test(f.name)) {
+      if (pptxDialog.open) pptxDialog.close();
+      importDeckFile(f);
+      return;
+    }
+    if (isImageFile(f)) { toast('To add a picture, drop it onto the slide'); return; }
+    if (/\.(ppt|key|odp|pdf)$/i.test(f.name)) {
+      openImportDialog();
+      pptxError('“' + f.name + '” can’t be imported. Save it as PowerPoint (.pptx) first — in Google Slides use File → Download → Microsoft PowerPoint.');
+      return;
+    }
+    openImportDialog();
+    pptxError('“' + f.name + '” isn’t a file CloudSlides can import. Use a .pptx, or a CloudSlides .json / .html deck.');
+  }
+
+  function importDeckFile(f) {
     X.readFile(f).then(function (txt) {
       var d = normalizeDoc(X.parseDeckFile(txt));
       var replace = confirm('Replace the current deck with "' + d.name + '"?\n\nOK = replace · Cancel = add its templates to this deck');
@@ -1854,7 +1874,7 @@
       renderHeader();
       toast('Imported ' + d.templates.length + ' template(s)');
     }).catch(function (e) { toast('Import failed: ' + e.message); });
-  });
+  }
 
   /* ---------- PowerPoint / Google Slides import ---------- */
 
@@ -1863,16 +1883,52 @@
 
   function pptxError(m) { $('#pptxError').textContent = m || ''; }
 
+  var importDrop = $('#importDrop');
+
+  // First state of the Import window: just the drop box.
+  function openImportDialog() {
+    pptxFile = null;
+    pptxBuf = null;
+    pptxError('');
+    importDrop.hidden = false;
+    $('#pptxInfo').hidden = true;
+    $('#pptxOptions').hidden = true;
+    $('#pptxReport').innerHTML = '';
+    if (!pptxDialog.open) pptxDialog.showModal();
+    importDrop.focus();
+  }
+
+  function pickImportFile() { $('#fileImport').value = ''; $('#fileImport').click(); }
+
+  importDrop.addEventListener('click', pickImportFile);
+  importDrop.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickImportFile(); }
+  });
+  importDrop.addEventListener('dragover', function (e) { e.preventDefault(); e.stopPropagation(); importDrop.classList.add('over'); });
+  importDrop.addEventListener('dragleave', function () { importDrop.classList.remove('over'); });
+  importDrop.addEventListener('drop', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    importDrop.classList.remove('over');
+    hideDropOverlay();
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleImportFile(f);
+  });
+
   function openPptxImport(file) {
     pptxFile = file;
     pptxBuf = null;
     pptxError('');
+    importDrop.hidden = true;
     $('#pptxReport').innerHTML = '';
     $('#pptxOptions').hidden = false;
     $('#pptxGo').disabled = true;
     var info = $('#pptxInfo');
+    info.hidden = false;
     info.innerHTML = '';
-    info.appendChild(h('b', { text: file.name }));
+    info.appendChild(h('div', { class: 'form-row', style: 'margin:0' },
+      h('b', { text: file.name }), h('div', { class: 'spacer' }),
+      h('button', { type: 'button', class: 'btn sm', onclick: openImportDialog }, 'Use a different file')));
     info.appendChild(h('div', { class: 'muted', text: 'Reading…' }));
     if (!pptxDialog.open) pptxDialog.showModal();
     file.arrayBuffer().then(function (buf) {
@@ -1959,6 +2015,41 @@
     box.appendChild(h('p', { class: 'note', text: 'Fonts switch to San Francisco, so check that long text still fits its box. Save to the Library when you are happy with it.' }));
     box.appendChild(h('div', { class: 'form-row' }, h('button', { type: 'button', class: 'btn primary', onclick: function () { pptxDialog.close(); } }, 'Done')));
   }
+
+  /* ---------- drop a file anywhere to import ---------- */
+
+  var dropOverlay = $('#dropOverlay');
+  var dragDepth = 0;
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+  function hideDropOverlay() { dragDepth = 0; dropOverlay.hidden = true; }
+  // Dragging over the slide is for pictures, so the overlay stays out of the way there.
+  function overStage(e) { return e.target && e.target.closest && e.target.closest('#stage'); }
+
+  window.addEventListener('dragenter', function (e) {
+    if (!hasFiles(e)) return;
+    dragDepth++;
+    dropOverlay.hidden = !!(overStage(e) || pptxDialog.open);
+  });
+  window.addEventListener('dragover', function (e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // otherwise the browser would open the file in place of the app
+    dropOverlay.hidden = !!(overStage(e) || pptxDialog.open);
+  });
+  window.addEventListener('dragleave', function (e) {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dropOverlay.hidden = true;
+  });
+  window.addEventListener('drop', function (e) {
+    if (!hasFiles(e)) return;
+    var tookPicture = e.defaultPrevented && overStage(e); // the slide already added the picture
+    e.preventDefault();
+    hideDropOverlay();
+    if (tookPicture) return;
+    var files = Array.prototype.slice.call(e.dataTransfer.files || []);
+    var f = files.filter(function (x) { return !isImageFile(x); })[0] || files[0];
+    if (f && !(overStage(e) && isImageFile(f))) handleImportFile(f);
+  });
 
   /* ---------- keyboard ---------- */
 

@@ -192,12 +192,18 @@
 
   <dialog id="pptxDialog" class="dialog">
     <form method="dialog" class="dlg-head">
-      <h2>Import PowerPoint</h2>
+      <h2>Import</h2>
       <button class="btn sm" value="close" aria-label="Close">&#10005;</button>
     </form>
     <div class="dlg-body">
-      <div class="current-project" id="pptxInfo"></div>
-      <div id="pptxOptions">
+      <div class="drop-zone" id="importDrop" role="button" tabindex="0" aria-label="Drop a file here, or press Enter to choose one">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 31V9m0 0l-8 8m8-8l8 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 29v8a3 3 0 003 3h26a3 3 0 003-3v-8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        <b>Drag your PowerPoint file here</b>
+        <span>or click to choose one</span>
+        <small>Google Slides: File → Download → Microsoft PowerPoint (.pptx). CloudSlides .json and .html decks work too.</small>
+      </div>
+      <div class="current-project" id="pptxInfo" hidden></div>
+      <div id="pptxOptions" hidden>
         <h3>Where should the slides go?</h3>
         <label class="radio-row"><input type="radio" name="pptxMode" value="new" checked> Start a new deck from this file</label>
         <label class="radio-row"><input type="radio" name="pptxMode" value="add"> Add its slides to the deck that is open now</label>
@@ -241,6 +247,7 @@
   <input type="file" id="fileImage" accept="image/png,image/jpeg" hidden>
   <input type="file" id="fileProjectJSON" accept=".json,application/json" hidden>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="drop-overlay" id="dropOverlay" hidden><div><b>Drop to import</b><span>PowerPoint (.pptx) or CloudSlides deck (.json / .html)</span></div></div>
 
   <script src="js/render.js"></script>
   <script src="js/data.js"></script>

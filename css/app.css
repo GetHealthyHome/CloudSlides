@@ -197,6 +197,30 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .lib-meta small { color: var(--muted); }
 .dot.warn { background: #ff9f0a; }
 
+/* Import drop zone */
+.drop-zone {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; margin-top: 14px; padding: 36px 20px;
+  border: 2px dashed #b9c9bd; border-radius: 14px; background: #f6faf7; color: var(--text); cursor: pointer; transition: background .15s, border-color .15s;
+}
+.drop-zone svg { width: 44px; height: 44px; color: #2f7d45; }
+.drop-zone b { font-size: 16px; }
+.drop-zone span { color: #2f7d45; font-weight: 500; }
+.drop-zone small { color: var(--muted); max-width: 380px; line-height: 1.45; margin-top: 4px; }
+.drop-zone:hover, .drop-zone:focus-visible { border-color: #2f7d45; outline: none; }
+.drop-zone.over { border-color: #2f7d45; background: #e3f2e6; }
+.drop-zone[hidden] { display: none; }
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: rgba(27, 77, 43, .45); pointer-events: none;
+}
+.drop-overlay[hidden] { display: none; }
+.drop-overlay > div {
+  display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; padding: 40px 48px; border-radius: 18px;
+  background: #fff; border: 3px dashed #2f7d45; box-shadow: 0 20px 60px rgba(0,0,0,.25);
+}
+.drop-overlay b { font-size: 20px; }
+.drop-overlay span { color: var(--muted); }
+
 /* PowerPoint import */
 .radio-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }
 .radio-row code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; background: var(--bg); padding: 1px 4px; border-radius: 4px; }
