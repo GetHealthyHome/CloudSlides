@@ -66,12 +66,21 @@
   }
 
   var toastTimer;
-  function toast(msg) {
+  // toast('Deleted', { action: 'Undo', onAction: fn }) shows a clickable action for a few seconds.
+  function toast(msg, opts) {
     var t = $('#toast');
-    t.textContent = msg;
+    t.textContent = '';
+    t.appendChild(document.createTextNode(msg));
+    if (opts && opts.action) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = opts.action;
+      b.addEventListener('click', function () { t.classList.remove('show'); opts.onAction(); });
+      t.appendChild(b);
+    }
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, opts && opts.action ? 7000 : 2600);
   }
 
   function prefs(k, v) {
@@ -692,7 +701,7 @@
 
   function deleteTemplate(t) {
     var uses = state.doc.deck.filter(function (d) { return d.templateId === t.id; }).length;
-    if (!confirm('Delete template "' + t.name + '"' + (uses ? ' and its ' + uses + ' place(s) in the deck' : '') + '?')) return;
+    if (!confirm('Delete the slide “' + t.name + '”?' + (uses > 1 ? '\n\nIt is used ' + uses + ' times in the deck; all of them will be removed.' : ''))) return;
     change(function () {
       var i = state.doc.templates.indexOf(t);
       state.doc.templates.splice(i, 1);
@@ -701,6 +710,7 @@
       state.currentId = next ? next.id : null;
       state.selectedId = null;
     });
+    toast('Deleted “' + t.name + '”', { action: 'Undo', onAction: undo });
   }
 
   function addToDeck(t) {
@@ -745,6 +755,14 @@
     return '';
   }
 
+  function trashIcon() {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 20 20');
+    s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>';
+    return s;
+  }
+
   function renderLists() {
     var list = $('#templateList');
     list.innerHTML = '';
@@ -755,13 +773,15 @@
       var ctx = hit ? hit.ctx : R.expandDeck({ templates: [t], deck: [{ id: 'x', templateId: t.id }] }, state.project)[0].ctx;
       var rl = repeatLabel(t);
       list.appendChild(h('li', null,
-        h('button', { type: 'button', class: 'thumb', 'aria-current': t.id === state.currentId ? 'true' : 'false', 'aria-label': 'Edit template ' + t.name, onclick: function () { openTemplate(t.id); } },
+        h('button', { type: 'button', class: 'thumb', 'aria-current': t.id === state.currentId ? 'true' : 'false', 'aria-label': 'Edit slide ' + t.name + ' (Delete key removes it)', onclick: function () { openTemplate(t.id); },
+          onkeydown: function (e) { if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); e.stopPropagation(); deleteTemplate(t); } } },
           thumbFor(t, ctx)),
         h('div', { class: 'thumb-meta' },
           h('span', { class: 'thumb-name', title: t.name, text: t.name }),
           rl ? h('span', { class: 'badge', text: '↻' , title: rl }) : null,
           h('span', { class: 'muted', title: 'Times used in the deck', text: inDeck ? '×' + inDeck : '' }),
-          h('button', { type: 'button', class: 'icon-btn', title: 'Add to master deck', 'aria-label': 'Add ' + t.name + ' to deck', onclick: function () { addToDeck(t); } }, '＋')
+          h('button', { type: 'button', class: 'icon-btn', title: 'Add to master deck', 'aria-label': 'Add ' + t.name + ' to deck', onclick: function () { addToDeck(t); } }, '＋'),
+          h('button', { type: 'button', class: 'icon-btn trash', title: 'Delete this slide', 'aria-label': 'Delete slide ' + t.name, onclick: function () { deleteTemplate(t); } }, trashIcon())
         )
       ));
     });
@@ -1541,6 +1561,7 @@
   /* ---------- shared template library (Supabase) ---------- */
 
   var libDialog = $('#libraryDialog');
+  var saving = false, pendingSave = false;
 
   function timeAgo(iso) {
     var d = new Date(iso);
@@ -1557,7 +1578,15 @@
     var dot = $('#cloudDot');
     dot.classList.toggle('on', !!c && !c.dirty);
     dot.classList.toggle('warn', !!c && c.dirty);
-    $('#cloudLabel').textContent = !c ? 'Library' : (c.dirty ? 'Library · unsaved' : 'Library · saved');
+    $('#cloudLabel').textContent = 'Library';
+    // The Save button always says where the deck stands.
+    var btn = $('#btnSave');
+    var label = saving ? 'Saving…' : (!c ? 'Save deck' : (c.dirty ? 'Save changes' : '✓ Saved'));
+    $('#saveLabel').textContent = label;
+    btn.classList.toggle('saved', !!c && !c.dirty && !saving);
+    btn.setAttribute('aria-busy', saving ? 'true' : 'false');
+    btn.title = !c ? 'Save this deck to the shared Library so it isn\u2019t lost (Ctrl/⌘ S)'
+      : (c.dirty ? 'You have changes that are not in the shared Library yet (Ctrl/⌘ S)' : 'Everything is saved in the shared Library');
   }
 
   function setCloud(meta) {
@@ -1634,11 +1663,16 @@
     });
   }
 
-  var saving = false;
   function saveToLibrary(asCopy) {
-    if (!D.getSession()) { openLibrary(); return Promise.resolve(); }
+    if (!D.getSession()) {
+      pendingSave = true; // finish the save right after signing in
+      openLibrary();
+      libError('Sign in to save this deck to the shared Library.');
+      return Promise.resolve();
+    }
     if (saving) return Promise.resolve();
     saving = true;
+    renderCloudStatus();
     libError('');
     setStatus('Saving to library…');
     return uploadEmbeddedImages().then(function () {
@@ -1677,8 +1711,8 @@
     }).catch(function (e) {
       setStatus('Library save failed');
       libError(e.message);
-      if (!libDialog.open) toast('Library save failed: ' + e.message);
-    }).then(function () { saving = false; });
+      if (!libDialog.open) toast('Save failed: ' + e.message);
+    }).then(function () { saving = false; renderCloudStatus(); });
   }
 
   function confirmLeave(action) {
@@ -1720,7 +1754,8 @@
     }).catch(function (e) { libError(e.message); });
   }
 
-  $('#btnLibrary').addEventListener('click', openLibrary);
+  $('#btnLibrary').addEventListener('click', function () { pendingSave = false; openLibrary(); });
+  $('#btnSave').addEventListener('click', function () { saveToLibrary(false); });
   $('#libLogin').addEventListener('submit', function (e) {
     e.preventDefault();
     libError('');
@@ -1729,6 +1764,7 @@
     D.signIn($('#libEmail').value.trim(), $('#libPassword').value).then(function () {
       $('#libPassword').value = '';
       renderLibrary();
+      if (pendingSave) { pendingSave = false; libDialog.close(); return saveToLibrary(false); }
       return refreshLibrary();
     }).catch(function (err) { libError(err.message); }).then(function () { btn.disabled = false; });
   });

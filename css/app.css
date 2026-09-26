@@ -43,6 +43,12 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
 .btn.primary:hover { background: #0071e3; }
 .btn.sm { padding: 3px 8px; font-size: 12px; }
+.btn.save { background: #2f7d45; border-color: #2f7d45; color: #fff; font-weight: 600; }
+.btn.save:hover { background: #1b4d2b; }
+.btn.save svg { width: 16px; height: 16px; }
+.btn.save.saved { background: #fff; color: #2f7d45; border-color: #b9c9bd; font-weight: 500; }
+.btn.save.saved:hover { background: #f6faf7; }
+.btn.save[aria-busy="true"] { opacity: .7; cursor: progress; }
 .btn.danger { color: var(--danger); }
 .btn:focus-visible, .tool:focus-visible, .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -100,6 +106,8 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 }
 .icon-btn:hover { background: #ececf0; color: var(--text); }
 .icon-btn:disabled { opacity: .35; cursor: default; background: none; }
+.icon-btn svg { width: 15px; height: 15px; }
+.icon-btn.trash:hover { color: var(--danger); background: #fdecee; }
 
 .deck-list li {
   display: flex; align-items: center; gap: 6px; padding: 5px 4px 5px 6px; border-radius: 6px; border: 1px solid var(--line); margin-bottom: 6px; background: #fff;
@@ -297,7 +305,10 @@ h3 { font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   background: #1d1d1f; color: #fff; padding: 9px 16px; border-radius: 10px; transition: .2s; z-index: 2000; max-width: calc(100vw - 32px);
 }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast button { border: 0; background: none; color: #8fd19e; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+.toast button:hover { text-decoration: underline; }
 
 /* Narrow screens: stack the panels so nothing scrolls sideways. */
 @media (max-width: 900px) {

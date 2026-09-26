@@ -52,7 +52,7 @@ Widescreen slides are fitted onto the 11 × 8.5 in page (keep proportions, or st
 
 ## Where templates are saved
 
-- **Shared library (Supabase).** Click **Library**, sign in with a crew account, then **Save** (or Ctrl/⌘ S). Everyone signed in sees the same decks on any computer and can open, edit, copy or delete them. If two people edit the same deck, the second person to save is asked whether to replace the other version or keep both. Decks are stored in the `slide_decks` table; JPG/PNG images placed in templates are uploaded to the public `template-assets` storage bucket. The schema is in `supabase/migrations/`.
+- **Shared library (Supabase).** Click the green **Save** button (or Ctrl/⌘ S); it asks you to sign in with a crew account the first time. The button always shows the state: **Save deck** (not in the library yet), **Save changes** (unsaved edits) or **✓ Saved**. Open other decks from **Library**. Everyone signed in sees the same decks on any computer and can open, edit, copy or delete them. If two people edit the same deck, the second person to save is asked whether to replace the other version or keep both. Decks are stored in the `slide_decks` table; JPG/PNG images placed in templates are uploaded to the public `template-assets` storage bucket. The schema is in `supabase/migrations/`.
 - **This browser.** Every change is also saved automatically in the browser (IndexedDB), so work survives reloads and opens offline. The **Library** button shows whether the open deck has changes that aren't in the library yet.
 - **Files.** **Export → Template deck (.json)** and **Import** still work for backups or moving a deck by hand.
 
