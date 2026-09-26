@@ -35,7 +35,7 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
 
 ## Importing PowerPoint / Google Slides
 
-In Google Slides choose **File → Download → Microsoft PowerPoint (.pptx)**, then click **Import** in CloudSlides and pick the file. Everything comes in as normal, editable items:
+In Google Slides choose **File → Download → Microsoft PowerPoint (.pptx)**, then drag the file onto the **Import** box in CloudSlides (or drop it anywhere on the app, or click the box to choose it). Everything comes in as normal, editable items:
 
 | In the .pptx | Becomes |
 |---|---|
