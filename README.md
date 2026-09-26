@@ -33,6 +33,23 @@ On Vercel, import the repo with framework preset **Other**, leave the build comm
 - **Present.** A full-screen stage that keeps the 11:8.5 shape, with ← / → / Space keys, dots, and Prev/Next buttons.
 - **Export / Print PDF.** Uses `@page { size: letter landscape; margin: 0 }`. Every slide is exactly 11 × 8.5 in on its own page, with no app chrome, exact print colors, and no trailing blank page.
 
+## Importing PowerPoint / Google Slides
+
+In Google Slides choose **File → Download → Microsoft PowerPoint (.pptx)**, then click **Import** in CloudSlides and pick the file. Everything comes in as normal, editable items:
+
+| In the .pptx | Becomes |
+|---|---|
+| Text boxes and text inside shapes | Text boxes (text, size, bold/italic, color, alignment, line breaks) |
+| Rectangles, rounded rectangles, ellipses | Boxes with the same fill, border and corner rounding |
+| Lines and connectors | Lines, with arrowheads and dash style |
+| Pictures (PNG, JPG, GIF, SVG) | Image boxes you can replace |
+| `[Photo: Front of home]` placeholder boxes | Photo field slots (the field is added to the deck's field list) |
+| Tables | A grid of cell boxes plus one editable text box per cell |
+| Groups | Their individual items |
+| Slide background color | Template background |
+
+Widescreen slides are fitted onto the 11 × 8.5 in page (keep proportions, or stretch). A text box holds one style, so mixed formatting inside one box takes the first run's style; fonts switch to San Francisco; charts and SmartArt are listed in the import report as not imported. The file is read entirely in the browser (no upload, works offline).
+
 ## Where templates are saved
 
 - **Shared library (Supabase).** Click **Library**, sign in with a crew account, then **Save** (or Ctrl/⌘ S). Everyone signed in sees the same decks on any computer and can open, edit, copy or delete them. If two people edit the same deck, the second person to save is asked whether to replace the other version or keep both. Decks are stored in the `slide_decks` table; JPG/PNG images placed in templates are uploaded to the public `template-assets` storage bucket. The schema is in `supabase/migrations/`.
@@ -68,6 +85,7 @@ js/render.js        shared slide renderer + viewer + print CSS (also embedded in
 js/data.js          Supabase / JSON / sample project loading
 js/export.js        JSON + HTML export, deck import
 js/templates.js     element defaults and the starter deck
+js/pptx.js          PowerPoint (.pptx) importer: ZIP + slide XML -> editable elements
 js/app.js           editor: canvas, snap grid, inspector, deck, history, autosave
 ```
 

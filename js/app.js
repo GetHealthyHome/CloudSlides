@@ -1828,6 +1828,7 @@
   $('#fileImport').addEventListener('change', function () {
     var f = this.files && this.files[0];
     if (!f) return;
+    if (/\.pptx$/i.test(f.name)) { openPptxImport(f); return; }
     X.readFile(f).then(function (txt) {
       var d = normalizeDoc(X.parseDeckFile(txt));
       var replace = confirm('Replace the current deck with "' + d.name + '"?\n\nOK = replace · Cancel = add its templates to this deck');
@@ -1855,10 +1856,114 @@
     }).catch(function (e) { toast('Import failed: ' + e.message); });
   });
 
+  /* ---------- PowerPoint / Google Slides import ---------- */
+
+  var pptxDialog = $('#pptxDialog');
+  var pptxFile = null, pptxBuf = null;
+
+  function pptxError(m) { $('#pptxError').textContent = m || ''; }
+
+  function openPptxImport(file) {
+    pptxFile = file;
+    pptxBuf = null;
+    pptxError('');
+    $('#pptxReport').innerHTML = '';
+    $('#pptxOptions').hidden = false;
+    $('#pptxGo').disabled = true;
+    var info = $('#pptxInfo');
+    info.innerHTML = '';
+    info.appendChild(h('b', { text: file.name }));
+    info.appendChild(h('div', { class: 'muted', text: 'Reading…' }));
+    if (!pptxDialog.open) pptxDialog.showModal();
+    file.arrayBuffer().then(function (buf) {
+      pptxBuf = buf;
+      var zip = window.CloudSlidesPptx.readZip(buf);
+      return zip.text('ppt/presentation.xml').then(function (xml) {
+        var d = xml && new DOMParser().parseFromString(xml, 'application/xml');
+        var sz = d && d.getElementsByTagNameNS('*', 'sldSz')[0];
+        var count = d ? d.getElementsByTagNameNS('*', 'sldId').length : 0;
+        if (!sz) throw new Error('No slides found in this file.');
+        var w = +sz.getAttribute('cx') / 914400, hh = +sz.getAttribute('cy') / 914400;
+        info.lastChild.textContent = count + ' slide' + (count === 1 ? '' : 's') + ' · ' + (Math.round(w * 100) / 100) + ' × ' + (Math.round(hh * 100) / 100) + ' in';
+        var same = Math.abs(w / hh - PAGE_W / PAGE_H) < 0.02;
+        $('#pptxFitBox').hidden = same;
+        $('#pptxFitNote').textContent = 'These slides are ' + (w / hh > 1.6 ? 'widescreen' : 'a different shape') + '; CloudSlides pages are US Letter landscape (11 × 8.5 in).';
+        $('#pptxGo').disabled = false;
+      });
+    }).catch(function (e) { info.lastChild.textContent = ''; pptxError(e.message); });
+  }
+
+  function radioVal(name) { var r = document.querySelector('input[name="' + name + '"]:checked'); return r ? r.value : ''; }
+
+  $('#pptxGo').addEventListener('click', function () {
+    if (!pptxBuf) return;
+    var mode = radioVal('pptxMode');
+    if (mode === 'new' && !confirmLeave('Start a new deck')) return;
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    pptxError('');
+    window.CloudSlidesPptx.importPptx(pptxBuf, { fit: radioVal('pptxFit') || 'fit', photoFields: $('#pptxPhoto').checked }).then(function (res) {
+      var name = pptxFile.name.replace(/\.pptx$/i, '').replace(/[_]+/g, ' ');
+      if (!res.templates.length) throw new Error('No slides could be read from this file.');
+      if (mode === 'new') {
+        loadDoc({ name: name, grid: clone(state.doc.grid), templates: res.templates, fields: res.fields,
+          deck: res.templates.map(function (t) { return { id: T.uid('d'), templateId: t.id }; }) }, null);
+      } else {
+        change(function () {
+          // Keep photo field keys unique across the whole deck.
+          var taken = {};
+          state.doc.fields.forEach(function (f) { taken[R.fieldKey(f.key)] = true; });
+          var renamed = {};
+          res.fields.forEach(function (f) {
+            var key = f.key, n = 2;
+            while (taken[R.fieldKey(key)]) key = f.key + '_' + n++;
+            taken[R.fieldKey(key)] = true;
+            renamed[f.key] = key;
+            state.doc.fields.push({ key: key, label: f.label });
+          });
+          res.templates.forEach(function (t) {
+            t.elements.forEach(function (e) { if (e.type === 'image' && e.bind && e.bind.kind === 'field' && renamed[e.bind.field]) e.bind.field = renamed[e.bind.field]; });
+            state.doc.templates.push(t);
+            state.doc.deck.push({ id: T.uid('d'), templateId: t.id });
+          });
+        });
+        openTemplate(res.templates[0].id);
+      }
+      showPptxReport(res.report);
+      toast('Imported ' + res.templates.length + ' slides');
+    }).catch(function (e) {
+      pptxError('Import failed: ' + e.message);
+    }).then(function () { btn.disabled = false; btn.textContent = 'Import slides'; });
+  });
+
+  function showPptxReport(r) {
+    $('#pptxOptions').hidden = true;
+    var box = $('#pptxReport');
+    box.innerHTML = '';
+    box.appendChild(h('h3', { text: 'Imported ' + r.slides + ' slide' + (r.slides === 1 ? '' : 's') + ' as editable templates' }));
+    var list = h('ul', { class: 'report-list' });
+    [[r.text, 'text box', 'text boxes'], [r.shapes, 'box', 'boxes'], [r.lines, 'line', 'lines'], [r.images, 'picture', 'pictures'],
+      [r.tables, 'table, as editable cells', 'tables, as editable cells'], [r.photoSlots, 'photo field', 'photo fields']]
+      .forEach(function (x) { if (x[0]) list.appendChild(h('li', { text: x[0] + ' ' + (x[0] === 1 ? x[1] : x[2]) })); });
+    box.appendChild(list);
+    var notes = [];
+    Object.keys(r.skipped).forEach(function (k) { notes.push(r.skipped[k] + ' × ' + k); });
+    if (r.rotated) notes.push(r.rotated + ' rotated item' + (r.rotated === 1 ? ' was' : 's were') + ' placed straight');
+    if (notes.length) {
+      box.appendChild(h('h3', { text: 'Needs a look' }));
+      var nl = h('ul', { class: 'report-list' });
+      notes.forEach(function (n) { nl.appendChild(h('li', { text: n })); });
+      box.appendChild(nl);
+    }
+    box.appendChild(h('p', { class: 'note', text: 'Fonts switch to San Francisco, so check that long text still fits its box. Save to the Library when you are happy with it.' }));
+    box.appendChild(h('div', { class: 'form-row' }, h('button', { type: 'button', class: 'btn primary', onclick: function () { pptxDialog.close(); } }, 'Done')));
+  }
+
   /* ---------- keyboard ---------- */
 
   document.addEventListener('keydown', function (e) {
-    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open || fieldsDialog.open) return;
+    if (document.querySelector('.cs-viewer') || dialog.open || libDialog.open || fieldsDialog.open || pptxDialog.open) return;
     var typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]');
     var mod = e.metaKey || e.ctrlKey;
     var key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
